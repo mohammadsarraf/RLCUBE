@@ -726,12 +726,13 @@ class Cube:
 if __name__ == "__main__":
 
     cube = Cube()
-    print(cube.is_solved())
-    scramble = "D' U2 B L2 B U2 L2 B' F' L2 D2 U L U B' L2 R' U B"
-    print(f"scramble: {scramble}, length: {len(scramble.split())}")
-    cube.apply_algorithm(scramble)
-    print(f"Kociemba string: {cube.to_kociemba_string()}, isSolved: {cube.is_solved()}")
-    solution = koc.solve(cube.to_kociemba_string())
-    print(f"Solution: {solution}, Length: {len(solution.split())}")
-    cube.apply_algorithm(solution)
-    print(f"Is solved: {cube.is_solved()}")
+    # print(cube.is_solved())
+    # scramble = "D' U2 B L2 B U2 L2 B' F' L2 D2 U L U B' L2 R' U B"
+    # print(f"scramble: {scramble}, length: {len(scramble.split())}")
+    # cube.apply_algorithm(scramble)
+    # print(f"Kociemba string: {cube.to_kociemba_string()}, isSolved: {cube.is_solved()}")
+    # solution = koc.solve(cube.to_kociemba_string())
+    # print(f"Solution: {solution}, Length: {len(solution.split())}")
+    # cube.apply_algorithm(solution)
+    # print(f"Is solved: {cube.is_solved()}")
+    print(koc.solve("FUUFUUFUURRRRRRRRRDFFDFFDFFBDDBDDBDDLLLLLLLLLBBUBBUBBU"))

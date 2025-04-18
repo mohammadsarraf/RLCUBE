@@ -14,8 +14,9 @@ MOVES = ["U", "U'", "U2", "D", "D'", "D2", "L", "L'", "L2", "R", "R'", "R2", "F"
 class CubeEnvironment:
     def __init__(self, max_steps=25):
         self.cube = Cube()
-        self.max_steps = max_steps
+        self.max_steps = max_steps  # Solution shouldn't be more than 25 moves
         self.current_step = 0
+        self.agent_moves = []  # Track the sequence of moves
         
     def reset(self):
         self.cube = Cube()
@@ -23,11 +24,13 @@ class CubeEnvironment:
         move = random.choice(MOVES)
         self.cube.apply_algorithm(move)
         self.current_step = 0
+        self.agent_moves = []  # Reset the moves list
         return self._get_state()
     
     def step(self, action):
         # Apply the move corresponding to the action
         self.cube.apply_algorithm(MOVES[action])
+        self.agent_moves.append(MOVES[action])  # Record the move
         self.current_step += 1
         
         # Check if cube is solved
@@ -63,6 +66,24 @@ class CubeEnvironment:
         if solved:
             reward += 100
         
+        # Penalize repeating moves (like R R R instead of R')
+        if len(self.agent_moves) >= 3:
+            last_three_moves = self.agent_moves[-3:]
+            if last_three_moves[0] == last_three_moves[1] == last_three_moves[2]:
+                reward -= 5  # Penalty for three consecutive identical moves
+        
+        # Penalize inverse moves that cancel each other (like R R')
+        if len(self.agent_moves) >= 2:
+            last_move = self.agent_moves[-1]
+            prev_move = self.agent_moves[-2]
+            
+            # Check for move cancellations (simplified check)
+            # For basic moves like R and R'
+            if (last_move.replace("'", "") == prev_move.replace("'", "") and 
+                ("'" in last_move) != ("'" in prev_move) and 
+                "2" not in last_move and "2" not in prev_move):
+                reward -= 10  # Larger penalty for canceling moves
+        
         # Use kociemba to estimate the distance to the solution
         try:
             solution = koc.solve(self.cube.to_kociemba_string())
@@ -72,10 +93,9 @@ class CubeEnvironment:
             reward -= 1 * solution_length
             
             # Extra reward for solutions shorter than Kociemba's
-            # This would require tracking the agent's solution length
-            # agent_solution_length = self.current_step
-            # if agent_solution_length < solution_length:
-            #     reward += (solution_length - agent_solution_length) * 5
+            agent_solution_length = len(self.agent_moves)
+            if solved and agent_solution_length < solution_length:
+                reward += (solution_length - agent_solution_length) * 5
             
             # Large reward for solutions under 20 moves (God's number)
             if solved and solution_length <= 20:
@@ -171,7 +191,7 @@ class DQNAgent:
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-def train_agent(episodes=2000, batch_size=64):
+def train_agent(episodes, batch_size=64):
     env = CubeEnvironment()
     state_size = 6 * 9 * 6  # 6 faces, 9 stickers per face, 6 possible colors
     action_size = len(MOVES)
@@ -201,11 +221,11 @@ def train_agent(episodes=2000, batch_size=64):
         agent.replay(batch_size)
         
         # Print progress
-        if (episode+1) % 20 == 0:
-            episode_time = time.time() - episode_start_time
-            elapsed_time = time.time() - start_time
-            print(f"Episode: {episode+1}/{episodes}, Solved: {solved_episodes}, Epsilon: {agent.epsilon:.4f}, \nEpisode Time: {episode_time:.2f}s, Total Time: {elapsed_time:.2f}s")
-    
+        if (episode+1) % 100 == 0:
+            # episode_time = time.time() - episode_start_time
+            # elapsed_time = time.time() - start_time
+            solved_rate = (solved_episodes / (episode + 1)) * 100
+            print(f"Episode: {episode+1}/{episodes}, Solved: {solved_episodes}, Solved Rate: {solved_rate:.2f}%, Epsilon: {agent.epsilon:.4f}")
     # Save trained model
     total_time = time.time() - start_time
     torch.save(agent.model.state_dict(), 'cube_solver_model.pt')
@@ -213,4 +233,4 @@ def train_agent(episodes=2000, batch_size=64):
     return agent
 
 if __name__ == "__main__":
-    train_agent(episodes=2000) 
+    train_agent(episodes=1000) 
