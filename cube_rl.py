@@ -194,7 +194,7 @@ def train_agent(episodes=2000, batch_size=64):
             if done and env.cube.is_solved():
                 solved_episodes += 1
                 episode_time = time.time() - episode_start_time
-                print(f"Episode: {episode+1}/{episodes}, Solved: {solved_episodes}, Epsilon: {agent.epsilon:.4f}, Time: {episode_time:.2f}s")
+                # print(f"Episode: {episode+1}/{episodes}, Solved: {solved_episodes}, Epsilon: {agent.epsilon:.4f}, Time: {episode_time:.2f}s")
                 break
         
         # Train the agent with experiences from memory
