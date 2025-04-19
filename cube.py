@@ -1,4 +1,6 @@
 import kociemba as koc
+import copy
+
 class Cube:
     """
     A class that represents a 3x3 Rubik's cube.
@@ -29,6 +31,12 @@ class Cube:
             ['B', 'B', 'B', 'B', 'B', 'B', 'B', 'B', 'B'],  # Back (Blue)
             ['Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y']   # Down (Yellow)
         ]
+    
+    def copy(self):
+        """Create a deep copy of the cube object."""
+        new_cube = Cube()
+        new_cube.faces = copy.deepcopy(self.faces)
+        return new_cube
     
     def __str__(self):
         """Return a string representation of the cube."""
@@ -527,7 +535,11 @@ class Cube:
         return all(all(face[0] == sticker for sticker in face) for face in self.faces)
     
     def scramble(self, num_moves=20):
-        """Apply a random sequence of moves to scramble the cube."""
+        """Apply a random sequence of moves to scramble the cube.
+        
+        Returns:
+            tuple: (self, scramble_str) where scramble_str is the applied moves
+        """
         import random
         
         moves = [
@@ -539,11 +551,25 @@ class Cube:
             self.B, self.B_prime, self.B2
         ]
         
-        # Apply random moves
-        for _ in range(num_moves):
-            random.choice(moves)()
+        move_names = [
+            "U", "U'", "U2",
+            "D", "D'", "D2",
+            "L", "L'", "L2",
+            "R", "R'", "R2",
+            "F", "F'", "F2",
+            "B", "B'", "B2"
+        ]
         
-        return self
+        # Apply random moves and track them
+        applied_moves = []
+        for _ in range(num_moves):
+            move_idx = random.randrange(len(moves))
+            moves[move_idx]()
+            applied_moves.append(move_names[move_idx])
+        
+        # Return both the cube and the scramble sequence
+        scramble_str = " ".join(applied_moves)
+        return self, scramble_str
 
     def apply_algorithm(self, algorithm):
         """
@@ -724,15 +750,25 @@ class Cube:
 
 # Example usage:
 if __name__ == "__main__":
-
-    cube = Cube()
-    # print(cube.is_solved())
-    # scramble = "D' U2 B L2 B U2 L2 B' F' L2 D2 U L U B' L2 R' U B"
-    # print(f"scramble: {scramble}, length: {len(scramble.split())}")
-    # cube.apply_algorithm(scramble)
-    # print(f"Kociemba string: {cube.to_kociemba_string()}, isSolved: {cube.is_solved()}")
-    # solution = koc.solve(cube.to_kociemba_string())
-    # print(f"Solution: {solution}, Length: {len(solution.split())}")
-    # cube.apply_algorithm(solution)
-    # print(f"Is solved: {cube.is_solved()}")
-    print(koc.solve("FUUFUUFUURRRRRRRRRDFFDFFDFFBDDBDDBDDLLLLLLLLLBBUBBUBBU"))
+    # Try to import the solve_from_input function from advanced_solver
+    try:
+        from advanced_solver import solve_from_input
+        # Call the function to get input and solve the cube
+        solve_from_input()
+    except ImportError:
+        print("Error: Could not import solve_from_input from advanced_solver.py")
+        print("Make sure advanced_solver.py is in the same directory.")
+        # Fall back to basic input
+        scramble = input("Enter a scramble: ")
+        cube = Cube()
+        try:
+            cube.apply_algorithm(scramble)
+            print(f"Applied scramble: {scramble}")
+            print("Cube state:")
+            print(cube)
+            
+            # Try to solve with kociemba as fallback
+            solution = cube.solve_with_kociemba()
+            print(f"\nSolution: {solution}")
+        except Exception as e:
+            print(f"Error: {str(e)}")
