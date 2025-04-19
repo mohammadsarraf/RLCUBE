@@ -254,11 +254,11 @@ class DQNAgent:
         self.state_size = state_size
         self.action_size = action_size
         self.memory = deque(maxlen=50000)  # Increase memory size
-        self.gamma = 0.95  # discount rate
+        self.gamma = 0.99  # discount rate
         self.epsilon = 1.0  # exploration rate
         self.epsilon_min = 0.05  # Slightly higher minimum epsilon
-        self.epsilon_decay = 0.998  # Slower decay
-        self.learning_rate = 0.001
+        self.epsilon_decay = 0.999  # Slower decay
+        self.learning_rate = 0.0005
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = DQN(state_size, action_size).to(self.device)
@@ -357,11 +357,15 @@ def ensure_scrambles_exist(scramble_moves, use_pregenerated=False):
         print(f"Error generating scrambles for level {scramble_moves}: {e}")
         return False
 
-def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=50000, 
-                         target_success_rate=30, batch_size=64, prev_checkpoint=None, 
+def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000, 
+                         target_success_rate=30, min_success_rate=None, batch_size=64, prev_checkpoint=None, 
                          use_pregenerated=False):
     """Train on a specific difficulty level"""
     print(f"\n=== Starting training with {scramble_moves} scramble moves ===")
+    
+    # If min_success_rate is not specified, use target_success_rate
+    if min_success_rate is None:
+        min_success_rate = target_success_rate
     
     # Ensure scrambles exist if using pregenerated scrambles
     if use_pregenerated:
@@ -410,7 +414,8 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=50000,
     final_checkpoint = f'cube_solver_model_scramble_{scramble_moves}.pt'
     
     # Training loop - continue until we reach target success rate or max episodes
-    while episode < max_episodes:
+    # Also ensure we continue training if we haven't reached min_success_rate
+    while episode < max_episodes or current_success_rate < min_success_rate:
         episode += 1
         
         # Distribution of difficulties:
@@ -475,12 +480,12 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=50000,
             os.system('cls' if os.name == 'nt' else 'clear')
             
             # Display training progress
-            print(f"=== Training Progress === - Max Level: {scramble_moves} - Min Episodes: {min_episodes} - Max Episodes: {max_episodes} - Target Success Rate: {target_success_rate}% - Batch Size: {batch_size} - Using Pregenerated Scrambles: {use_pregenerated} - Previous Checkpoint: {prev_checkpoint if prev_checkpoint else 'None'}")
+            print(f"=== Training Progress === - Max Level: {scramble_moves} - Min Episodes: {min_episodes} - Max Episodes: {max_episodes} - Target Success Rate: {target_success_rate}% - Min Success Rate: {min_success_rate}% - Batch Size: {batch_size} - Using Pregenerated Scrambles: {use_pregenerated} - Previous Checkpoint: {prev_checkpoint if prev_checkpoint else 'None'}")
             print(f"  - Using Pregenerated Scrambles: {use_pregenerated}")
             print(f"  - Previous Checkpoint: {prev_checkpoint if prev_checkpoint else 'None'}")
             print("=" * 50)
             print(f"Level: {scramble_moves}")
-            print(f"Episode: {episode}/{max_episodes}")
+            print(f"Episode: {episode}/{max_episodes if episode <= max_episodes else 'unlimited until '+str(min_success_rate)+'% success'}")
             print()
             
             # Performance metrics
@@ -529,7 +534,7 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=50000,
     return final_checkpoint
 
 def progressive_training(start_level=None, max_scramble=20, min_episodes=5000, 
-                         max_episodes=50000, target_success_rate=30, batch_size=64,
+                         max_episodes=10000, target_success_rate=30, min_success_rate=None, batch_size=64,
                          use_pregenerated=True):
     """Train progressively with increasing scramble difficulty"""
     
@@ -562,6 +567,7 @@ def progressive_training(start_level=None, max_scramble=20, min_episodes=5000,
             min_episodes=min_episodes,
             max_episodes=max_episodes,
             target_success_rate=target_success_rate,
+            min_success_rate=min_success_rate,
             batch_size=batch_size,
             prev_checkpoint=checkpoint,
             use_pregenerated=use_pregenerated
@@ -670,10 +676,12 @@ if __name__ == "__main__":
                         help='Maximum difficulty level to train up to')
     parser.add_argument('--min_episodes', type=int, default=5000, 
                         help='Minimum episodes per difficulty level')
-    parser.add_argument('--max_episodes', type=int, default=50000, 
+    parser.add_argument('--max_episodes', type=int, default=10000, 
                         help='Maximum episodes per difficulty level')
-    parser.add_argument('--target_rate', type=int, default=30, 
+    parser.add_argument('--target_rate', type=int, default=50, 
                         help='Target success rate to achieve before moving to next level')
+    parser.add_argument('--min_rate', type=int, default=None, 
+                        help='Minimum success rate to achieve regardless of episode count')
     parser.add_argument('--batch_size', type=int, default=64, 
                         help='Batch size for training')
     parser.add_argument('--use_pregenerated', action='store_true',
@@ -688,6 +696,7 @@ if __name__ == "__main__":
         min_episodes=args.min_episodes,
         max_episodes=args.max_episodes,
         target_success_rate=args.target_rate,
+        min_success_rate=args.min_rate,
         batch_size=args.batch_size,
         use_pregenerated=args.use_pregenerated
     )

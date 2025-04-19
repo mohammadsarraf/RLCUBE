@@ -47,6 +47,14 @@ class AdvancedCubeSolver:
         # Load the trained model
         self.model.load_state_dict(torch.load(model_path, map_location=self.device))
         self.model.eval()  # Set to evaluation mode
+        
+        # Define macro-operators for solving specific patterns
+        self.macros = {
+            "corner_swap": ["R", "U", "R'", "U'", "R'", "F", "R", "F'"],  # Sexy move
+            "edge_flip": ["R", "U", "R'", "U", "R", "U2", "R'", "U"],     # Sune
+            "corner_twist": ["R'", "D'", "R", "D"],                       # Corner orientation
+            "center_rotation": ["F", "R", "U", "R'", "U'", "F'"]          # Sledgehammer
+        }
     
     def solve(self, scramble_sequence=None, scramble_cube=None, verbose=True):
         """
@@ -95,28 +103,87 @@ class AdvancedCubeSolver:
                 print(f"Cube solved using standard approach in {len(solution_moves)} moves.")
             return success, solution_moves, "standard"
         
-        # Try different strategies
-        strategies = [
-            ("random restart", self._random_restart_solve),
-            ("temperature exploration", self._temperature_explore_solve),
-            ("breadth search", self._breadth_search_solve),
-            # ("reverse moves", self._reverse_moves_solve)
+        # Strategy tiers ordered by computational complexity and effectiveness
+        # Tier 1: Fast strategies (minimal computation, try these first)
+        # Tier 2: Medium strategies (moderate computation)
+        # Tier 3: Slow, complex strategies (expensive computation, try these last)
+        
+        strategy_tiers = [
+            # Tier 1: Fast strategies
+            [
+                ("random restart", self._random_restart_solve, 5),  # 3 retries - very fast & effective
+                ("temperature exploration", self._temperature_explore_solve, 5),  # 1 retry - fast
+            ],
+            # Tier 2: Medium strategies 
+            [
+                ("macro operators", self._macro_operators_solve, 5),  # 2 retries - medium speed
+                ("breadth search", self._breadth_search_solve, 5),  # 1 retry - medium speed
+            ],
+            # Tier 3: Slow, complex strategies
+            [
+                ("monte carlo tree search", self._mcts_solve, 5),  # 3 retries - computationally expensive
+                ("beam search", self._beam_search_solve, 5),  # 2 retries - computationally expensive
+            ]
         ]
         
-        for strategy_name, strategy_fn in strategies:
+        # Attempt strategies in order of tiers
+        for tier_idx, tier in enumerate(strategy_tiers):
             if verbose:
-                print(f"\nStandard solve failed. Trying alternative approach: {strategy_name}...")
+                print(f"\nTrying tier {tier_idx+1} strategies...")
             
-            success, solution_moves = strategy_fn(cube.copy(), verbose)
-            
-            if success:
+            for strategy_name, strategy_fn, max_retries in tier:
                 if verbose:
-                    print(f"Cube solved using {strategy_name} approach in {len(solution_moves)} moves.")
-                return success, solution_moves, strategy_name
+                    print(f"Trying {strategy_name} approach...")
+                
+                # Try the strategy with multiple retries if configured
+                for attempt in range(max_retries):
+                    # Only show retry message if we're actually retrying
+                    if attempt > 0 and verbose:
+                        print(f"  Retry {attempt}/{max_retries-1} for {strategy_name}...")
+                    
+                    # Create modified parameters for retries to explore different parts of the search space
+                    retry_params = {}
+                    if strategy_name == "monte carlo tree search":
+                        # Vary the exploration constant
+                        retry_params["exploration_factor"] = 1.0 + (attempt * 0.3)
+                    elif strategy_name == "beam search":
+                        # Vary the beam width
+                        retry_params["beam_width"] = 3 + attempt
+                    elif strategy_name == "random restart":
+                        # No special parameters needed, the strategy is already random
+                        pass
+                    
+                    # Run the strategy with retry parameters
+                    success, solution_moves = self._run_strategy_with_params(strategy_fn, cube.copy(), retry_params, verbose)
+                    
+                    if success:
+                        if verbose:
+                            print(f"Cube solved using {strategy_name} approach (attempt {attempt+1}) in {len(solution_moves)} moves.")
+                        return success, solution_moves, f"{strategy_name} (retry {attempt+1})"
         
         if verbose:
             print("\nAll solving approaches failed.")
         return False, [], "failed"
+    
+    def _run_strategy_with_params(self, strategy_fn, cube, params, verbose):
+        """Run a strategy with modified parameters"""
+        # Save original parameters
+        original_params = {}
+        
+        try:
+            # Set temporary parameters
+            for param_name, param_value in params.items():
+                if hasattr(self, param_name):
+                    original_params[param_name] = getattr(self, param_name)
+                    setattr(self, param_name, param_value)
+            
+            # Run the strategy
+            return strategy_fn(cube, verbose)
+            
+        finally:
+            # Restore original parameters
+            for param_name, param_value in original_params.items():
+                setattr(self, param_name, param_value)
     
     def _standard_solve(self, cube, verbose=True):
         """Use the standard DQN model to solve the cube"""
@@ -393,6 +460,390 @@ class AdvancedCubeSolver:
                 return False, solution_moves
         
         return False, solution_moves
+    
+    def _mcts_solve(self, cube, verbose=True):
+        """Monte Carlo Tree Search approach to find a solution"""
+        # Maximum number of iterations for MCTS
+        max_iterations = 200
+        # Maximum search depth
+        max_depth = min(20, self.max_steps)
+        # Exploration constant for UCB1
+        exploration_constant = 1.41
+        
+        class MCTSNode:
+            def __init__(self, state, parent=None, action=None):
+                self.state = state  # Cube state representation
+                self.parent = parent  # Parent node
+                self.action = action  # Action that led to this state
+                self.children = {}  # Child nodes
+                self.visits = 0  # Number of visits
+                self.reward = 0  # Total reward
+                self.untried_actions = list(range(len(MOVES)))  # Possible moves
+                random.shuffle(self.untried_actions)  # Randomize action order
+            
+            def ucb1(self):
+                """UCB1 formula for node selection"""
+                if self.visits == 0:
+                    return float('inf')
+                return (self.reward / self.visits) + exploration_constant * np.sqrt(np.log(self.parent.visits) / self.visits)
+            
+            def select_child(self):
+                """Select child with highest UCB1 value"""
+                return max(self.children.values(), key=lambda node: node.ucb1())
+            
+            def expand(self, action, next_state):
+                """Add a new child node"""
+                child = MCTSNode(next_state, parent=self, action=action)
+                self.untried_actions.remove(action)
+                self.children[action] = child
+                return child
+            
+            def update(self, reward):
+                """Update node statistics"""
+                self.visits += 1
+                self.reward += reward
+        
+        # Setup environment
+        env = CubeEnvironment(max_steps=self.max_steps)
+        env.cube = cube
+        state = env._get_state()
+        
+        # Create root node
+        root = MCTSNode(state)
+        
+        # MCTS iterations
+        iteration = 0
+        best_solution = []
+        best_reward = -float('inf')
+        
+        while iteration < max_iterations:
+            if verbose and iteration % 20 == 0:
+                print(f"MCTS iteration {iteration}/{max_iterations}")
+            
+            # Reset environment for this simulation
+            sim_env = CubeEnvironment(max_steps=self.max_steps)
+            sim_env.cube = cube.copy()
+            sim_env.current_step = 0
+            
+            # Selection phase - navigate through tree until leaf node
+            node = root
+            path = []
+            
+            while not node.untried_actions and node.children:
+                node = node.select_child()
+                action = node.action
+                path.append(MOVES[action])
+                sim_env.step(action)
+            
+            # Check if current state is solved
+            if sim_env.cube.is_solved():
+                if verbose:
+                    print(f"MCTS found solution during selection!")
+                return True, path
+            
+            # Expansion phase - if node has untried actions, pick one randomly
+            if node.untried_actions:
+                action = node.untried_actions[0]  # Take first untried action
+                next_state, _, done = sim_env.step(action)
+                path.append(MOVES[action])
+                
+                # Check if solved after expansion
+                if done and sim_env.cube.is_solved():
+                    if verbose:
+                        print(f"MCTS found solution during expansion!")
+                    return True, path
+                
+                node = node.expand(action, next_state)
+            
+            # Simulation phase - random rollout to evaluate position
+            rollout_depth = 0
+            rollout_path = []
+            
+            while rollout_depth < max_depth:
+                if sim_env.cube.is_solved():
+                    break
+                
+                # Get action from model with some randomness
+                state_tensor = torch.FloatTensor(sim_env._get_state()).unsqueeze(0).to(self.device)
+                with torch.no_grad():
+                    q_values = self.model(state_tensor).cpu().numpy()[0]
+                
+                # Add randomness for exploration
+                q_values = q_values + np.random.random(len(q_values)) * 0.1
+                action = np.argmax(q_values)
+                
+                next_state, _, done = sim_env.step(action)
+                rollout_path.append(MOVES[action])
+                rollout_depth += 1
+                
+                if done:
+                    break
+            
+            # Calculate reward
+            if sim_env.cube.is_solved():
+                reward = 10.0  # High reward for solved cube
+                
+                # Save solution if it's better than what we have
+                solution = path + rollout_path
+                if len(solution) < len(best_solution) or not best_solution:
+                    best_solution = solution
+                    if verbose:
+                        print(f"MCTS found solution! Length: {len(best_solution)}")
+                    return True, best_solution
+            else:
+                # Partial reward based on how close to solved
+                try:
+                    # Use Kociemba distance estimation as a heuristic
+                    kociemba_str = sim_env.cube.to_kociemba_string()
+                    solution_str = koc.solve(kociemba_str)
+                    distance = len(solution_str.split())
+                    reward = max(0, 20 - distance) / 20.0  # Normalize between 0 and 1
+                except:
+                    # If kociemba fails, use a simple heuristic
+                    # Count correct colors on each face
+                    correct_stickers = 0
+                    for face in range(6):
+                        center_color = sim_env.cube.state[face][4]  # Center sticker
+                        for i in range(9):
+                            if sim_env.cube.state[face][i] == center_color:
+                                correct_stickers += 1
+                    reward = correct_stickers / 54.0  # Normalize to [0,1]
+            
+            # Backpropagation - update statistics for all nodes in path
+            while node:
+                node.update(reward)
+                node = node.parent
+            
+            iteration += 1
+        
+        # If we couldn't find a full solution, return the best partial solution
+        if best_solution:
+            return False, best_solution
+        
+        # If no good solutions found, use the most promising sequence from root
+        if root.children:
+            best_child = max(root.children.values(), key=lambda node: node.reward / max(1, node.visits))
+            path = []
+            
+            # Reconstruct path from best child
+            current = best_child
+            while current.parent != root:
+                path.insert(0, MOVES[current.action])
+                current = current.parent
+            
+            path.insert(0, MOVES[best_child.action])
+            return False, path
+        
+        return False, []
+    
+    def _macro_operators_solve(self, cube, verbose=True):
+        """Use predefined macro-operators (move sequences) to solve common patterns"""
+        env = CubeEnvironment(max_steps=self.max_steps)
+        env.cube = cube
+        env.current_step = 0
+        env.agent_moves = []
+        
+        state = env._get_state()
+        solution_moves = []
+        steps = 0
+        
+        # We'll use a combination of model-based and macro-based approach
+        while steps < self.max_steps:
+            # Check if solved
+            if env.cube.is_solved():
+                return True, solution_moves
+            
+            # Every few steps, try to apply a macro if it improves the state
+            if steps % 3 == 0:
+                best_macro = None
+                best_macro_score = float('-inf')
+                best_macro_moves = []
+                
+                # Try each macro and see which gives the best result
+                for macro_name, macro_moves in self.macros.items():
+                    # Create a copy of the current environment
+                    test_env = CubeEnvironment(max_steps=self.max_steps)
+                    test_env.cube = env.cube.copy()
+                    test_env.current_step = env.current_step
+                    
+                    # Apply the macro
+                    for move in macro_moves:
+                        move_idx = MOVES.index(move)
+                        test_env.step(move_idx)
+                    
+                    # Evaluate resulting state
+                    try:
+                        # Use kociemba distance as a heuristic
+                        kociemba_str = test_env.cube.to_kociemba_string()
+                        solution_str = koc.solve(kociemba_str)
+                        distance = len(solution_str.split())
+                        score = -distance  # Negative because shorter is better
+                    except:
+                        # Fallback heuristic: count correct stickers
+                        correct_stickers = 0
+                        for face in range(6):
+                            center_color = test_env.cube.state[face][4]  # Center sticker
+                            for i in range(9):
+                                if test_env.cube.state[face][i] == center_color:
+                                    correct_stickers += 1
+                        score = correct_stickers
+                    
+                    # If this is the best macro so far, save it
+                    if score > best_macro_score:
+                        best_macro_score = score
+                        best_macro = macro_name
+                        best_macro_moves = macro_moves
+                
+                # If we found a useful macro, apply it
+                if best_macro and best_macro_score > 0:
+                    if verbose:
+                        print(f"Step {steps}: Applying macro '{best_macro}'")
+                    
+                    for move in best_macro_moves:
+                        move_idx = MOVES.index(move)
+                        solution_moves.append(move)
+                        state, _, done = env.step(move_idx)
+                        steps += 1
+                        
+                        if done and env.cube.is_solved():
+                            return True, solution_moves
+                        
+                        if done or steps >= self.max_steps:
+                            return False, solution_moves
+                    
+                    continue
+            
+            # If no macro was applied, use the model
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                action = torch.argmax(self.model(state_tensor)).item()
+            
+            # Apply the model-selected move
+            move = MOVES[action]
+            solution_moves.append(move)
+            
+            if verbose and steps % 5 == 0:
+                print(f"Step {steps+1}: {move}")
+            
+            state, _, done = env.step(action)
+            steps += 1
+            
+            # Check if solved
+            if done and env.cube.is_solved():
+                return True, solution_moves
+            
+            if done:
+                return False, solution_moves
+        
+        return False, solution_moves
+    
+    def _beam_search_solve(self, cube, verbose=True):
+        """Use beam search to explore multiple solution paths simultaneously"""
+        # Beam width - number of states to explore at each level
+        beam_width = 5
+        # Maximum search depth
+        max_depth = self.max_steps
+        
+        # Define a state node for beam search
+        class BeamNode:
+            def __init__(self, cube, moves=None, score=0):
+                self.cube = cube
+                self.moves = moves or []
+                self.score = score
+            
+            def __lt__(self, other):
+                return self.score > other.score  # For priority queue (higher score is better)
+        
+        # Function to evaluate a cube state
+        def evaluate_cube(cube_state):
+            try:
+                # Use kociemba distance as a primary heuristic
+                kociemba_str = cube_state.to_kociemba_string()
+                solution_str = koc.solve(kociemba_str)
+                distance = len(solution_str.split())
+                score = 100 - 2 * distance  # Penalize longer solutions
+            except:
+                # Fallback heuristic: count correct stickers
+                correct_stickers = 0
+                for face in range(6):
+                    center_color = cube_state.state[face][4]  # Center sticker
+                    for i in range(9):
+                        if cube_state.state[face][i] == center_color:
+                            correct_stickers += 1
+                score = correct_stickers
+            
+            return score
+        
+        # Initialize beam with the starting state
+        beam = [BeamNode(cube.copy(), [], evaluate_cube(cube))]
+        
+        # Beam search
+        depth = 0
+        while depth < max_depth and beam:
+            if verbose and depth % 5 == 0:
+                print(f"Beam search depth: {depth}/{max_depth}")
+            
+            # Generate all possible next states for all nodes in the beam
+            next_beam = []
+            
+            for node in beam:
+                # Check if this node is already solved
+                if node.cube.is_solved():
+                    if verbose:
+                        print(f"Solution found at depth {depth}")
+                    return True, node.moves
+                
+                # Get model predictions for this state
+                env = CubeEnvironment()
+                env.cube = node.cube
+                state = env._get_state()
+                
+                state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+                with torch.no_grad():
+                    q_values = self.model(state_tensor).cpu().numpy()[0]
+                
+                # Get top actions from the model
+                top_actions = np.argsort(-q_values)
+                
+                # Explore all possible moves for this node
+                for action in top_actions[:beam_width]:  # Limit exploration to top actions
+                    # Create a copy of the cube
+                    new_cube = node.cube.copy()
+                    
+                    # Apply the move
+                    move = MOVES[action]
+                    new_cube.apply_algorithm(move)
+                    
+                    # Create new node
+                    new_moves = node.moves + [move]
+                    new_score = evaluate_cube(new_cube)
+                    
+                    # Add bonus for moves recommended by the model
+                    model_confidence = q_values[action]
+                    new_score += model_confidence * 0.5
+                    
+                    # Add to candidates
+                    next_beam.append(BeamNode(new_cube, new_moves, new_score))
+            
+            # Select the best nodes for the next beam
+            next_beam.sort()  # Sort by score (higher is better)
+            beam = next_beam[:beam_width]  # Keep only the best nodes
+            
+            # Check if the best node is solved
+            if beam and beam[0].cube.is_solved():
+                if verbose:
+                    print(f"Solution found at depth {depth+1}")
+                return True, beam[0].moves
+            
+            depth += 1
+        
+        # If we reach here, we couldn't find a solution
+        # Return the best partial solution
+        if beam:
+            best_node = beam[0]
+            return False, best_node.moves
+        
+        return False, []
     
     # def _reverse_moves_solve(self, cube, verbose=True):
     #     """

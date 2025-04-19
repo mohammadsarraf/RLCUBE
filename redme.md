@@ -8,7 +8,7 @@ python cube_rl.py --level 2
 python cube_rl.py --level 2 --max_level 4 --min_episodes 10000 --target_rate 40
 
 # Train just one specific level
-python cube_rl.py --level 3 --max_level 3
+python cube_rl.py --level 4 --max_level 4
 
 # Train with pregenerated scrambles
 python cube_rl.py --use_pregenerated
