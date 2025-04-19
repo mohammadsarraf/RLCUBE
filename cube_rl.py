@@ -152,7 +152,7 @@ class CubeEnvironment:
         if len(self.agent_moves) >= 3:
             last_three_moves = self.agent_moves[-3:]
             if last_three_moves[0] == last_three_moves[1] == last_three_moves[2]:
-                reward -= 5  # Penalty for three consecutive identical moves
+                reward -= 10  # Penalty for three consecutive identical moves
         
         # Penalize sequences like R2 R or R2 R' (inefficient move combinations)
         if len(self.agent_moves) >= 2:
@@ -163,13 +163,13 @@ class CubeEnvironment:
             if "2" in prev_move and not "2" in last_move:
                 # If they're moves on the same face
                 if prev_move.replace("2", "") == last_move.replace("'", ""):
-                    reward -= 12  # Penalty for inefficient sequence
+                    reward -= 10  # Penalty for inefficient sequence
             
             # Check for the reverse case: R followed by R2 (another inefficient sequence)
             elif "2" in last_move and not "2" in prev_move:
                 # If they're moves on the same face
                 if last_move.replace("2", "") == prev_move.replace("'", ""):
-                    reward -= 12  # Penalty for inefficient sequence
+                    reward -= 10  # Penalty for inefficient sequence
         
         # Penalize inverse moves that cancel each other (like R R')
         if len(self.agent_moves) >= 2:
@@ -193,7 +193,7 @@ class CubeEnvironment:
             if "2" in last_move and "2" in third_last_move:
                 # If they're the same face (like U2 F U2)
                 if last_move.replace("2", "") == third_last_move.replace("2", ""):
-                    reward -= 15  # Penalty for inefficient sequences
+                    reward -= 10  # Penalty for inefficient sequences
             
             # Check for sequences where moves on opposite faces interact inefficiently
             # For example B2 F B2 is just F
@@ -203,7 +203,7 @@ class CubeEnvironment:
             # If the moves are on opposite faces and both are double moves (2)
             if "2" in last_move and "2" in third_last_move:
                 if self.opposite_faces.get(last_face) == third_last_face:
-                    reward -= 15  # Penalty for inefficient sequences
+                    reward -= 10  # Penalty for inefficient sequences
             
             # Check for patterns like L R L' where a move is followed by another move
             # and then the inverse of the first move
@@ -211,7 +211,7 @@ class CubeEnvironment:
                 third_last_move.replace("'", "") != second_last_move.replace("'", "") and 
                 third_last_move.replace("'", "") == last_move.replace("'", "") and
                 ("'" in third_last_move) != ("'" in last_move)):
-                reward -= 15  # Penalty for inefficient sequences like L R L'
+                reward -= 10  # Penalty for inefficient sequences like L R L'
         
         # Use kociemba to estimate the distance to the solution
         try:
@@ -219,7 +219,7 @@ class CubeEnvironment:
             solution_length = len(solution.split())
             
             # Negative reward based on solution length (shorter is better)
-            reward -= 0.5 * solution_length  # Reduced from 1 to 0.5
+            reward -= 1 * solution_length  # Reduced from 1 to 0.5
             
             # Extra reward for solutions shorter than Kociemba's
             agent_solution_length = len(self.agent_moves)
@@ -479,7 +479,7 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=50000,
             print(f"  - Using Pregenerated Scrambles: {use_pregenerated}")
             print(f"  - Previous Checkpoint: {prev_checkpoint if prev_checkpoint else 'None'}")
             print("=" * 50)
-            print(f"Level: {scramble_moves}/{find_latest_checkpoint_level() + scramble_moves}")
+            print(f"Level: {scramble_moves}")
             print(f"Episode: {episode}/{max_episodes}")
             print()
             
