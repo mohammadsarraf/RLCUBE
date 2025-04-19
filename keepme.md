@@ -108,3 +108,5 @@ python cube_rl.py --level 1 --max_level 5 --min_episodes 5000 --max_episodes 500
 - Standard solver: 60-70% success rate for 5-move scrambles
 - Advanced solver: 98-100% success rate
 - Leverage existing architecture while optimizing training process and data quality
+
+python cube_rl.py --level 3 --max_level 3 --min_rate 92 --batch_size 128 --use_pregenerated

@@ -23,6 +23,7 @@ class CubeEnvironment:
         self.agent_moves = []  # Track the sequence of moves
         self.scramble_moves = scramble_moves  # Number of scramble moves
         self.use_pregenerated = use_pregenerated  # Whether to use pregenerated scrambles
+        self.scramble_usage_count = 0  # Track how many scrambles have been used
         
         # Define move cancellation patterns
         self.opposite_faces = {
@@ -81,11 +82,34 @@ class CubeEnvironment:
         except Exception as e:
             print(f"Error loading scrambles: {e}")
             self.use_pregenerated = False
+    
+    def check_and_regenerate_scrambles(self):
+        """Check if we're running out of scrambles and regenerate if needed"""
+        # If we've used a significant portion of scrambles, regenerate
+        if self.use_pregenerated and self.pregenerated_scrambles:
+            self.scramble_usage_count += 1
+            
+            # Regenerate when we've used all scrambles (typically 50,000)
+            if self.scramble_usage_count >= len(self.pregenerated_scrambles):
+                print(f"\nUsed all {len(self.pregenerated_scrambles)} scrambles. Generating a new set...")
+                try:
+                    # Generate new scrambles
+                    subprocess.run(["python", "gen.py", "--level", str(self.scramble_moves)], check=True)
+                    # Reset counter
+                    self.scramble_usage_count = 0
+                    # Reload scrambles
+                    self.load_scrambles(self.scramble_moves)
+                    print(f"Successfully regenerated scrambles for level {self.scramble_moves}")
+                except Exception as e:
+                    print(f"Error regenerating scrambles: {e}")
         
     def reset(self):
         self.cube = Cube()
         self.current_step = 0
         self.agent_moves = []  # Reset the moves list
+        
+        # Check if we need to regenerate scrambles
+        self.check_and_regenerate_scrambles()
         
         scramble_moves = []
         if self.use_pregenerated and self.pregenerated_scrambles:
@@ -148,11 +172,14 @@ class CubeEnvironment:
         else:
             reward -= 10  # Reduced negative reward, was too harsh at -100
         
+        # Collect penalties instead of directly applying them
+        penalties = []
+        
         # Penalize repeating moves (like R R R instead of R')
         if len(self.agent_moves) >= 3:
             last_three_moves = self.agent_moves[-3:]
             if last_three_moves[0] == last_three_moves[1] == last_three_moves[2]:
-                reward -= 10  # Penalty for three consecutive identical moves
+                penalties.append(-10)  # Penalty for three consecutive identical moves
         
         # Penalize sequences like R2 R or R2 R' (inefficient move combinations)
         if len(self.agent_moves) >= 2:
@@ -163,13 +190,13 @@ class CubeEnvironment:
             if "2" in prev_move and not "2" in last_move:
                 # If they're moves on the same face
                 if prev_move.replace("2", "") == last_move.replace("'", ""):
-                    reward -= 10  # Penalty for inefficient sequence
+                    penalties.append(-10)  # Penalty for inefficient sequence
             
             # Check for the reverse case: R followed by R2 (another inefficient sequence)
             elif "2" in last_move and not "2" in prev_move:
                 # If they're moves on the same face
                 if last_move.replace("2", "") == prev_move.replace("'", ""):
-                    reward -= 10  # Penalty for inefficient sequence
+                    penalties.append(-10)  # Penalty for inefficient sequence
         
         # Penalize inverse moves that cancel each other (like R R')
         if len(self.agent_moves) >= 2:
@@ -181,7 +208,7 @@ class CubeEnvironment:
             if (last_move.replace("'", "") == prev_move.replace("'", "") and 
                 ("'" in last_move) != ("'" in prev_move) and 
                 "2" not in last_move and "2" not in prev_move):
-                reward -= 10  # Larger penalty for canceling moves
+                penalties.append(-10)  # Larger penalty for canceling moves
         
         # Penalize inefficient sequences like B2 F B2 (where B2 B2 would cancel out)
         if len(self.agent_moves) >= 3:
@@ -193,7 +220,7 @@ class CubeEnvironment:
             if "2" in last_move and "2" in third_last_move:
                 # If they're the same face (like U2 F U2)
                 if last_move.replace("2", "") == third_last_move.replace("2", ""):
-                    reward -= 10  # Penalty for inefficient sequences
+                    penalties.append(-10)  # Penalty for inefficient sequences
             
             # Check for sequences where moves on opposite faces interact inefficiently
             # For example B2 F B2 is just F
@@ -203,7 +230,7 @@ class CubeEnvironment:
             # If the moves are on opposite faces and both are double moves (2)
             if "2" in last_move and "2" in third_last_move:
                 if self.opposite_faces.get(last_face) == third_last_face:
-                    reward -= 10  # Penalty for inefficient sequences
+                    penalties.append(-10)  # Penalty for inefficient sequences
             
             # Check for patterns like L R L' where a move is followed by another move
             # and then the inverse of the first move
@@ -211,24 +238,34 @@ class CubeEnvironment:
                 third_last_move.replace("'", "") != second_last_move.replace("'", "") and 
                 third_last_move.replace("'", "") == last_move.replace("'", "") and
                 ("'" in third_last_move) != ("'" in last_move)):
-                reward -= 10  # Penalty for inefficient sequences like L R L'
+                penalties.append(-10)  # Penalty for inefficient sequences like L R L'
+        
+        # Apply only the worst penalty instead of stacking them all
+        if penalties:
+            reward += min(penalties)
         
         # Use kociemba to estimate the distance to the solution
         try:
             solution = koc.solve(self.cube.to_kociemba_string())
             solution_length = len(solution.split())
             
-            # Negative reward based on solution length (shorter is better)
-            reward -= 1 * solution_length  # Reduced from 1 to 0.5
+            # Reduced negative reward based on solution length (shorter is better)
+            # Using a gentler scaling factor of 0.5 instead of 1
+            reward -= 0.5 * solution_length
             
             # Extra reward for solutions shorter than Kociemba's
             agent_solution_length = len(self.agent_moves)
-            if solved and agent_solution_length < solution_length:
-                reward += (solution_length - agent_solution_length) * 5
+            if solved:
+                if agent_solution_length < solution_length:
+                    # More reward for solving in fewer moves than Kociemba
+                    reward += (solution_length - agent_solution_length) * 5
+                elif agent_solution_length > solution_length + 5:
+                    # Only penalize if significantly longer than Kociemba (5+ moves more)
+                    reward -= (agent_solution_length - solution_length - 5) * 2
             
-            # Large reward for solutions under 20 moves (God's number)
+            # Smoothly scaled reward for solutions under 20 moves (God's number)
             if solved and solution_length <= 20:
-                reward += 200 - (solution_length * 5)  # Higher reward for shorter solutions
+                reward += 5 * (20 - solution_length)  # Higher reward for shorter solutions, scales linearly
         
         except:
             # If kociemba fails (invalid cube state), give a small negative reward
@@ -359,7 +396,7 @@ def ensure_scrambles_exist(scramble_moves, use_pregenerated=False):
 
 def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000, 
                          target_success_rate=30, min_success_rate=None, batch_size=64, prev_checkpoint=None, 
-                         use_pregenerated=False):
+                         use_pregenerated=False, recent_window=1000):
     """Train on a specific difficulty level"""
     print(f"\n=== Starting training with {scramble_moves} scramble moves ===")
     
@@ -395,8 +432,16 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000,
         try:
             agent.model.load_state_dict(torch.load(prev_checkpoint))
             print(f"Loaded checkpoint from {prev_checkpoint}")
-            # Reset epsilon to a higher value when moving to a new difficulty
-            agent.epsilon = max(0.5, agent.epsilon)  # Ensure at least 50% exploration for new difficulty
+            
+            # Use a lower epsilon when using a checkpoint to better utilize learned knowledge
+            # For the same level, use very little exploration
+            if os.path.basename(prev_checkpoint) == f'cube_solver_model_scramble_{scramble_moves}.pt':
+                agent.epsilon = max(0.05, agent.epsilon_min)  # Minimal exploration when continuing same level
+                print(f"Continuing training on same level {scramble_moves} with minimal exploration (epsilon: {agent.epsilon:.4f})")
+            else:
+                # For a new difficulty level, use moderate exploration 
+                agent.epsilon = 0.2  # 20% exploration when moving to a new level
+                print(f"Training level {scramble_moves} from previous level checkpoint with moderate exploration (epsilon: {agent.epsilon:.4f})")
         except:
             print(f"Failed to load checkpoint from {prev_checkpoint}, starting fresh")
     
@@ -405,17 +450,22 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000,
     episodes_by_difficulty = {i: 0 for i in range(1, scramble_moves + 1)}
     start_time = time.time()
     current_success_rate = 0
+    recent_success_rate = 0
     episode = 0
     
     # Keep track of recent scrambles and outcomes
     recent_scrambles = []  # Will store tuples of (scramble, outcome, moves)
+    
+    # Keep track of recent episodes for success rate calculation
+    recent_episodes = deque(maxlen=recent_window)
+    recent_solved = deque(maxlen=recent_window)
     
     # Define the final checkpoint name for this difficulty level
     final_checkpoint = f'cube_solver_model_scramble_{scramble_moves}.pt'
     
     # Training loop - continue until we reach target success rate or max episodes
     # Also ensure we continue training if we haven't reached min_success_rate
-    while episode < max_episodes or current_success_rate < min_success_rate:
+    while episode < max_episodes or (recent_success_rate < min_success_rate and episode >= recent_window):
         episode += 1
         
         # Distribution of difficulties:
@@ -437,7 +487,7 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000,
         moves_taken = 0
         
         # Get the scramble that was applied
-        scramble = " ".join(env_to_use.agent_moves) if env_to_use.agent_moves else "Random scramble"
+        scramble = " ".join(env_to_use.scramble_sequence) if env_to_use.scramble_sequence else "Random scramble"
         
         while not done:
             action = agent.act(state)
@@ -447,23 +497,29 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000,
             moves_taken += 1
             
             if done:
-                outcome = "Solved" if env_to_use.cube.is_solved() else "Failed"
+                solved = env_to_use.cube.is_solved()
+                outcome = "Solved" if solved else "Failed"
                 # Add to recent scrambles
                 recent_scrambles.append((scramble, outcome, moves_taken))
                 # Keep only the 5 most recent scrambles
                 if len(recent_scrambles) > 5:
                     recent_scrambles.pop(0)
                 
-                if outcome == "Solved":
+                if solved:
                     solved_by_difficulty[selected_diff] += 1
                     if selected_diff == scramble_moves:  # Count solutions for current difficulty
                         solved_episodes += 1
+                        
+                # Track recent episodes (only for the current difficulty level)
+                if selected_diff == scramble_moves:
+                    recent_episodes.append(1)
+                    recent_solved.append(1 if solved else 0)
                 break
         
         # Train the agent with experiences from memory
         agent.replay(batch_size)
         
-        # Print progress and check success rate every 10 episodes
+        # Print progress and check success rate every 100 episodes
         if episode % 100 == 0 or episode == 1:
             # Calculate success rate for current difficulty
             main_episodes = episodes_by_difficulty[scramble_moves]
@@ -471,6 +527,12 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000,
             
             if main_episodes > 0:
                 current_success_rate = (main_solved / main_episodes) * 100
+            
+            # Calculate recent success rate
+            if len(recent_episodes) > 0:
+                recent_success_rate = (sum(recent_solved) / len(recent_episodes)) * 100
+            else:
+                recent_success_rate = 0
             
             all_solved = sum(solved_by_difficulty.values())
             all_episodes = sum(episodes_by_difficulty.values())
@@ -490,7 +552,8 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000,
             
             # Performance metrics
             print(f"Performance Summary:")
-            print(f"✓ Solved Rate (Current Level): {current_success_rate:.2f}%")
+            print(f"✓ Solved Rate (All Episodes): {current_success_rate:.2f}%")
+            print(f"✓ Recent Solved Rate (Last {len(recent_episodes)} Episodes): {recent_success_rate:.2f}%")
             print(f"✓ Overall Success Rate: {overall_rate:.2f}%")
             print(f"✓ Exploration Rate (Epsilon): {agent.epsilon:.4f}")
             print()
@@ -516,8 +579,9 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000,
                 print(f"\nSaved checkpoint: {final_checkpoint}")
         
         # Check if we've met the success criteria and minimum episodes
-        if episode >= min_episodes and current_success_rate >= target_success_rate:
-            print(f"\nReached target success rate of {target_success_rate}% after {episode} episodes!")
+        # Use recent success rate instead of overall success rate
+        if episode >= min_episodes and len(recent_episodes) >= min(recent_window, 500) and recent_success_rate >= target_success_rate:
+            print(f"\nReached target success rate of {target_success_rate}% (recent {recent_success_rate:.2f}%) after {episode} episodes!")
             break
     
     # Save final model for this scramble difficulty
@@ -525,7 +589,8 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000,
     total_time = time.time() - start_time
     print(f"\nTraining completed. Scramble moves: {scramble_moves}, "
           f"Episodes: {episode}, Solved: {solved_episodes}/{episodes_by_difficulty[scramble_moves]}, "
-          f"Success Rate: {current_success_rate:.2f}%, Time: {total_time:.2f} seconds.")
+          f"Success Rate: {current_success_rate:.2f}%, Recent Success Rate: {recent_success_rate:.2f}%, "
+          f"Time: {total_time:.2f} seconds.")
     
     # Test on current difficulty
     print(f"\n=== Testing agent with {scramble_moves} scramble moves ===")
@@ -535,7 +600,7 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000,
 
 def progressive_training(start_level=None, max_scramble=20, min_episodes=5000, 
                          max_episodes=10000, target_success_rate=30, min_success_rate=None, batch_size=64,
-                         use_pregenerated=True):
+                         use_pregenerated=True, custom_checkpoint=None, recent_window=1000):
     """Train progressively with increasing scramble difficulty"""
     
     # If no start_level is specified, try to find the highest level with a checkpoint
@@ -549,9 +614,11 @@ def progressive_training(start_level=None, max_scramble=20, min_episodes=5000,
     start_level = max(1, start_level)
     print(f"Starting progressive training from level {start_level} up to {max_scramble}")
     
-    checkpoint = None
-    # If we're starting beyond level 1, load the checkpoint from the previous level
-    if start_level > 1:
+    checkpoint = custom_checkpoint if custom_checkpoint else None
+    
+    # If no custom checkpoint was provided and we're starting beyond level 1, 
+    # load the checkpoint from the previous level
+    if checkpoint is None and start_level > 1:
         prev_level = start_level - 1
         prev_checkpoint = f'cube_solver_model_scramble_{prev_level}.pt'
         if os.path.exists(prev_checkpoint):
@@ -559,6 +626,8 @@ def progressive_training(start_level=None, max_scramble=20, min_episodes=5000,
             print(f"Will use checkpoint from level {prev_level}: {prev_checkpoint}")
         else:
             print(f"Warning: Starting at level {start_level} but no checkpoint found for level {prev_level}")
+    elif checkpoint:
+        print(f"Using custom checkpoint: {checkpoint}")
             
     # Train progressively from start_level to max_scramble
     for scramble_moves in range(start_level, max_scramble + 1):
@@ -570,7 +639,8 @@ def progressive_training(start_level=None, max_scramble=20, min_episodes=5000,
             min_success_rate=min_success_rate,
             batch_size=batch_size,
             prev_checkpoint=checkpoint,
-            use_pregenerated=use_pregenerated
+            use_pregenerated=use_pregenerated,
+            recent_window=recent_window
         )
 
 def test_agent(num_tests=100, scramble_moves=1, checkpoint_path=None, use_pregenerated=True):
@@ -686,6 +756,10 @@ if __name__ == "__main__":
                         help='Batch size for training')
     parser.add_argument('--use_pregenerated', action='store_true',
                         help='Use pregenerated scrambles from nMovescramble.txt instead of random scrambles')
+    parser.add_argument('--model', type=str, default=None,
+                        help='Path to a specific model checkpoint to use instead of searching for the latest checkpoint')
+    parser.add_argument('--recent_window', type=int, default=1000,
+                        help='Number of recent episodes to consider for calculating success rate')
     
     args = parser.parse_args()
     
@@ -698,7 +772,9 @@ if __name__ == "__main__":
         target_success_rate=args.target_rate,
         min_success_rate=args.min_rate,
         batch_size=args.batch_size,
-        use_pregenerated=args.use_pregenerated
+        use_pregenerated=args.use_pregenerated,
+        custom_checkpoint=args.model,
+        recent_window=args.recent_window
     )
     
     # To test the latest checkpoint:

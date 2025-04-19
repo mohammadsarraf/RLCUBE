@@ -111,18 +111,18 @@ class AdvancedCubeSolver:
         strategy_tiers = [
             # Tier 1: Fast strategies
             [
-                ("random restart", self._random_restart_solve, 5),  # 3 retries - very fast & effective
-                ("temperature exploration", self._temperature_explore_solve, 5),  # 1 retry - fast
+                ("random restart", self._random_restart_solve, 5), 
+                ("temperature exploration", self._temperature_explore_solve, 5), 
             ],
             # Tier 2: Medium strategies 
             [
-                ("macro operators", self._macro_operators_solve, 5),  # 2 retries - medium speed
-                ("breadth search", self._breadth_search_solve, 5),  # 1 retry - medium speed
+                ("macro operators", self._macro_operators_solve, 5),  
+                ("breadth search", self._breadth_search_solve, 5),  
             ],
             # Tier 3: Slow, complex strategies
             [
-                ("monte carlo tree search", self._mcts_solve, 5),  # 3 retries - computationally expensive
-                ("beam search", self._beam_search_solve, 5),  # 2 retries - computationally expensive
+                ("monte carlo tree search", self._mcts_solve, 5),  
+                ("beam search", self._beam_search_solve, 5),  
             ]
         ]
         
