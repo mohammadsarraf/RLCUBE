@@ -154,6 +154,23 @@ class CubeEnvironment:
             if last_three_moves[0] == last_three_moves[1] == last_three_moves[2]:
                 reward -= 5  # Penalty for three consecutive identical moves
         
+        # Penalize sequences like R2 R or R2 R' (inefficient move combinations)
+        if len(self.agent_moves) >= 2:
+            last_move = self.agent_moves[-1]
+            prev_move = self.agent_moves[-2]
+            
+            # Check if previous move was a double move (R2) and current move is on the same face (R or R')
+            if "2" in prev_move and not "2" in last_move:
+                # If they're moves on the same face
+                if prev_move.replace("2", "") == last_move.replace("'", ""):
+                    reward -= 12  # Penalty for inefficient sequence
+            
+            # Check for the reverse case: R followed by R2 (another inefficient sequence)
+            elif "2" in last_move and not "2" in prev_move:
+                # If they're moves on the same face
+                if last_move.replace("2", "") == prev_move.replace("'", ""):
+                    reward -= 12  # Penalty for inefficient sequence
+        
         # Penalize inverse moves that cancel each other (like R R')
         if len(self.agent_moves) >= 2:
             last_move = self.agent_moves[-1]
@@ -458,7 +475,10 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=50000,
             os.system('cls' if os.name == 'nt' else 'clear')
             
             # Display training progress
-            print(f"=== Training Progress ===")
+            print(f"=== Training Progress === - Max Level: {scramble_moves} - Min Episodes: {min_episodes} - Max Episodes: {max_episodes} - Target Success Rate: {target_success_rate}% - Batch Size: {batch_size} - Using Pregenerated Scrambles: {use_pregenerated} - Previous Checkpoint: {prev_checkpoint if prev_checkpoint else 'None'}")
+            print(f"  - Using Pregenerated Scrambles: {use_pregenerated}")
+            print(f"  - Previous Checkpoint: {prev_checkpoint if prev_checkpoint else 'None'}")
+            print("=" * 50)
             print(f"Level: {scramble_moves}/{find_latest_checkpoint_level() + scramble_moves}")
             print(f"Episode: {episode}/{max_episodes}")
             print()
@@ -510,7 +530,7 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=50000,
 
 def progressive_training(start_level=None, max_scramble=20, min_episodes=5000, 
                          max_episodes=50000, target_success_rate=30, batch_size=64,
-                         use_pregenerated=False):
+                         use_pregenerated=True):
     """Train progressively with increasing scramble difficulty"""
     
     # If no start_level is specified, try to find the highest level with a checkpoint
@@ -551,6 +571,7 @@ def test_agent(num_tests=100, scramble_moves=1, checkpoint_path=None, use_pregen
     """Test a trained agent on cube solving"""
     # Ensure scrambles exist if using pregenerated scrambles
     if use_pregenerated:
+      
         if not ensure_scrambles_exist(scramble_moves, use_pregenerated):
             print(f"Warning: Could not generate scrambles for testing level {scramble_moves}. Using random scrambles.")
             use_pregenerated = False
@@ -610,7 +631,7 @@ def test_agent(num_tests=100, scramble_moves=1, checkpoint_path=None, use_pregen
             os.system('cls' if os.name == 'nt' else 'clear')
             
             # Display test progress
-            print(f"=== Testing Progress ===")
+            print(f"=== Testing Progress === ")
             print(f"Testing Level: {scramble_moves}")
             print(f"Test: {test+1}/{num_tests}")
             print()
