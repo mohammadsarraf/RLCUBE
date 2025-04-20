@@ -1,4 +1,4 @@
-.PHONY: train input advance improve train_all gen test
+.PHONY: train input advance improve train_all gen test parallel_train parallel_improve
 
 # test:
 # 	python test_rl_agent.py --scramble $(n) --tests "$(t)" --model "modelCheckpoints/cube_solver_model_scramble_$(n).pt"
@@ -21,6 +21,16 @@ advance:
 
 improve:
 	python cube_rl.py --level "$(n)" --max_level "$(n)" --min_rate "$(r)" --batch_size 128 --use_pregenerated --target_rate 100 --model "modelCheckpoints/cube_solver_model_scramble_$(n).pt"
+
+# New parallel training commands
+parallel_train:
+	python parallel_cube_rl.py --mode train --level $(s) --max_level $(e) --min_rate $(r) --use_pregenerated --target_rate 100 --min_episodes 50000 --batch_size 128 --recent_window 10000 --processes $(p)
+
+parallel_improve:
+	python parallel_cube_rl.py --mode improve --levels $(l) --min_rate $(r) --batch_size 128 --use_pregenerated --target_rate 100 --processes $(p)
+
+parallel_test:
+	python parallel_cube_rl.py --mode test --test_level $(n) --num_tests $(t) --use_pregenerated
 
 train_all:
 	./train_all.sh
