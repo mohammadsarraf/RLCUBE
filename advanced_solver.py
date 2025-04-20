@@ -55,6 +55,28 @@ class AdvancedCubeSolver:
             "corner_twist": ["R'", "D'", "R", "D"],                       # Corner orientation
             "center_rotation": ["F", "R", "U", "R'", "U'", "F'"]          # Sledgehammer
         }
+        
+        # For logging control
+        self._last_step_logged = 0
+    
+    def _log_step(self, step, move, steps_total, verbose=True, label=None, always_show=False):
+        """Helper method for cleaner logging during solving process"""
+        if not verbose:
+            return
+            
+        # Only log every few steps to keep output cleaner, unless always_show is True
+        if not always_show and step % 5 != 0 and step != steps_total - 1:
+            return
+            
+        # Update last logged step
+        self._last_step_logged = step
+        
+        # Format the step string
+        step_str = f"Step {step+1}/{steps_total}: {move}"
+        if label:
+            step_str += f" ({label})"
+            
+        print(step_str)
     
     def solve(self, scramble_sequence=None, scramble_cube=None, verbose=True):
         """
@@ -131,15 +153,21 @@ class AdvancedCubeSolver:
             if verbose:
                 print(f"\nTrying tier {tier_idx+1} strategies...")
             
-            for strategy_name, strategy_fn, max_retries in tier:
+            for strategy_idx, (strategy_name, strategy_fn, max_retries) in enumerate(tier):
                 if verbose:
-                    print(f"Trying {strategy_name} approach...")
+                    # Clear previous strategy output by printing over it
+                    if tier_idx > 0 or strategy_idx > 0:
+                        # Move cursor up 1 line and clear to end of screen
+                        print("\033[1A\033[J", end="")
+                    print(f"Tier {tier_idx+1}: Trying {strategy_name} approach...")
                 
                 # Try the strategy with multiple retries if configured
                 for attempt in range(max_retries):
                     # Only show retry message if we're actually retrying
                     if attempt > 0 and verbose:
-                        print(f"  Retry {attempt}/{max_retries-1} for {strategy_name}...")
+                        # Clear the previous attempt output
+                        print("\033[1A\033[J", end="")
+                        print(f"Tier {tier_idx+1}: {strategy_name} - Retry {attempt}/{max_retries-1}...")
                     
                     # Create modified parameters for retries to explore different parts of the search space
                     retry_params = {}
@@ -196,6 +224,8 @@ class AdvancedCubeSolver:
         solution_moves = []
         steps = 0
         
+        self._last_step_logged = -1  # Reset logging counter
+        
         while steps < self.max_steps:
             # Get action from model
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
@@ -205,8 +235,9 @@ class AdvancedCubeSolver:
             # Apply action
             move = MOVES[action]
             solution_moves.append(move)
-            if verbose and steps % 5 == 0:
-                print(f"Step {steps+1}: {move}")
+            
+            # Log step (but keep it clean)
+            self._log_step(steps, move, self.max_steps, verbose)
             
             state, _, done = env.step(action)
             steps += 1
@@ -231,7 +262,10 @@ class AdvancedCubeSolver:
         # Try each of the 18 possible moves as a starting point
         for move_idx in range(len(MOVES)):
             if verbose:
-                print(f"Trying move {move_idx+1}/18: {MOVES[move_idx]}")
+                # Clear previous attempt message if not the first one
+                if move_idx > 0:
+                    print("\033[1A\033[J", end="")
+                print(f"Random restart: trying move {move_idx+1}/18: {MOVES[move_idx]}")
             
             # Create a copy of the cube for this attempt
             test_cube = cube.copy()
@@ -254,6 +288,8 @@ class AdvancedCubeSolver:
             
             # Continue with model-guided actions
             steps = 1  # We've already made one move
+            self._last_step_logged = -1  # Reset logging counter
+            
             while steps < self.max_steps:
                 # Get action from model
                 state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
@@ -263,6 +299,10 @@ class AdvancedCubeSolver:
                 # Apply action
                 move = MOVES[action]
                 solution_moves.append(move)
+                
+                # Log step with restart label
+                restart_label = f"restart {move_idx+1}"
+                self._log_step(steps, move, self.max_steps, verbose, restart_label)
                 
                 state, _, done = env.step(action)
                 steps += 1
@@ -301,6 +341,7 @@ class AdvancedCubeSolver:
         steps = 0
         
         temperature = 1.0  # Starting temperature
+        self._last_step_logged = -1  # Reset logging counter
         
         while steps < self.max_steps:
             # Get Q-values from model
@@ -323,8 +364,9 @@ class AdvancedCubeSolver:
             move = MOVES[action]
             solution_moves.append(move)
             
-            if verbose and steps % 5 == 0:
-                print(f"Step {steps+1}: {move} (temp: {temperature:.2f})")
+            # Log step with temperature label
+            temp_label = f"temp: {temperature:.2f}"
+            self._log_step(steps, move, self.max_steps, verbose, temp_label)
             
             state, _, done = env.step(action)
             steps += 1
@@ -356,6 +398,8 @@ class AdvancedCubeSolver:
         solution_moves = []
         steps = 0
         
+        self._last_step_logged = -1  # Reset logging counter
+        
         while steps < self.max_steps:
             # If we're nearly out of steps, use the standard approach
             if steps > self.max_steps - search_depth:
@@ -365,6 +409,8 @@ class AdvancedCubeSolver:
                 
                 move = MOVES[action]
                 solution_moves.append(move)
+                self._log_step(steps, move, self.max_steps, verbose, "standard")
+                
                 state, _, done = env.step(action)
                 steps += 1
                 
@@ -386,6 +432,10 @@ class AdvancedCubeSolver:
             # Evaluate each action by looking ahead
             best_action = None
             best_value = float('-inf')
+            
+            # Indicate we're doing breadth search analysis
+            if verbose and steps % 5 == 0:
+                print(f"Breadth search analysis at step {steps+1}...")
             
             for action in top_actions:
                 # Create a temporary environment for simulation
@@ -446,8 +496,8 @@ class AdvancedCubeSolver:
             move = MOVES[best_action]
             solution_moves.append(move)
             
-            if verbose and steps % 5 == 0:
-                print(f"Step {steps+1}: {move} (breadth search)")
+            # Log with breadth search label
+            self._log_step(steps, move, self.max_steps, verbose, "breadth search")
             
             state, _, done = env.step(best_action)
             steps += 1
@@ -518,6 +568,9 @@ class AdvancedCubeSolver:
         
         while iteration < max_iterations:
             if verbose and iteration % 20 == 0:
+                # Clear previous iteration message if present
+                if iteration > 0:
+                    print("\033[1A\033[J", end="")
                 print(f"MCTS iteration {iteration}/{max_iterations}")
             
             # Reset environment for this simulation
@@ -588,6 +641,8 @@ class AdvancedCubeSolver:
                 if len(solution) < len(best_solution) or not best_solution:
                     best_solution = solution
                     if verbose:
+                        # Clear previous solution message if present
+                        print("\033[1A\033[J", end="")
                         print(f"MCTS found solution! Length: {len(best_solution)}")
                     return True, best_solution
             else:
@@ -647,6 +702,8 @@ class AdvancedCubeSolver:
         solution_moves = []
         steps = 0
         
+        self._last_step_logged = -1  # Reset logging counter
+        
         # We'll use a combination of model-based and macro-based approach
         while steps < self.max_steps:
             # Check if solved
@@ -658,6 +715,9 @@ class AdvancedCubeSolver:
                 best_macro = None
                 best_macro_score = float('-inf')
                 best_macro_moves = []
+                
+                if verbose and steps % 5 == 0:
+                    print(f"Evaluating macros at step {steps+1}...")
                 
                 # Try each macro and see which gives the best result
                 for macro_name, macro_moves in self.macros.items():
@@ -697,11 +757,15 @@ class AdvancedCubeSolver:
                 # If we found a useful macro, apply it
                 if best_macro and best_macro_score > 0:
                     if verbose:
-                        print(f"Step {steps}: Applying macro '{best_macro}'")
+                        print(f"Applying macro '{best_macro}'")
                     
                     for move in best_macro_moves:
                         move_idx = MOVES.index(move)
                         solution_moves.append(move)
+                        
+                        # Log step with macro label
+                        self._log_step(steps, move, self.max_steps, verbose, f"macro: {best_macro}", always_show=True)
+                        
                         state, _, done = env.step(move_idx)
                         steps += 1
                         
@@ -722,8 +786,8 @@ class AdvancedCubeSolver:
             move = MOVES[action]
             solution_moves.append(move)
             
-            if verbose and steps % 5 == 0:
-                print(f"Step {steps+1}: {move}")
+            # Log step
+            self._log_step(steps, move, self.max_steps, verbose)
             
             state, _, done = env.step(action)
             steps += 1
@@ -781,7 +845,10 @@ class AdvancedCubeSolver:
         depth = 0
         while depth < max_depth and beam:
             if verbose and depth % 5 == 0:
-                print(f"Beam search depth: {depth}/{max_depth}")
+                # Clear previous depth message
+                if depth > 0:
+                    print("\033[1A\033[J", end="")
+                print(f"Beam search depth: {depth}/{max_depth} (width: {beam_width})")
             
             # Generate all possible next states for all nodes in the beam
             next_beam = []
@@ -974,7 +1041,7 @@ def solve_with_retry(scramble_sequence=None, scramble_cube=None, model_path=None
         verbose=verbose
     )
 
-def solve_benchmark(num_tests=100, scramble_moves=1, model_path=None, use_pregenerated=False):
+def solve_benchmark(num_tests=100, scramble_moves=1, model_path=None, use_pregenerated=False, max_steps=50):
     """
     Benchmark the advanced solving approach against the standard approach.
     
@@ -983,6 +1050,7 @@ def solve_benchmark(num_tests=100, scramble_moves=1, model_path=None, use_pregen
         scramble_moves: Number of moves to scramble the cube
         model_path: Path to model checkpoint
         use_pregenerated: Whether to use pregenerated scrambles
+        max_steps: Maximum steps for solving attempts
         
     Returns:
         A comparison of success rates between standard and advanced approaches
@@ -1000,16 +1068,38 @@ def solve_benchmark(num_tests=100, scramble_moves=1, model_path=None, use_pregen
         print(f"Using latest checkpoint: {model_path}")
     
     # Load pregenerated scrambles if requested
-    pregenerated_scrambles = []
+    scrambles = []
     if use_pregenerated:
-        pregenerated_scrambles = load_scrambles_from_file(scramble_moves, num_tests)
-        if not pregenerated_scrambles:
+        scrambles = load_scrambles_from_file(scramble_moves, num_tests)
+        if not scrambles:
             print(f"Could not load pregenerated scrambles for {scramble_moves} moves. Using random scrambles.")
             use_pregenerated = False
     
-    # Initialize environment and solver
-    env = CubeEnvironment(max_steps=50, scramble_moves=scramble_moves)
-    solver = AdvancedCubeSolver(model_path=model_path, max_steps=50)
+    # Generate random scrambles if needed
+    if not use_pregenerated:
+        for _ in range(num_tests):
+            cube = Cube()
+            scramble = []
+            for _ in range(scramble_moves):
+                move = random.choice(MOVES)
+                scramble.append(move)
+            scrambles.append({"scramble": scramble})
+    
+    # Ensure we have the correct number of scrambles
+    scrambles = scrambles[:num_tests]
+    
+    # Initialize environment and prepare for standard solving
+    env = CubeEnvironment(max_steps=max_steps, scramble_moves=scramble_moves)
+    
+    # Set up device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Create and load model
+    state_size = 6 * 9 * 6
+    action_size = len(MOVES)
+    model = DQN(state_size, action_size).to(device)
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
     
     # Statistics
     standard_solved = 0
@@ -1018,48 +1108,38 @@ def solve_benchmark(num_tests=100, scramble_moves=1, model_path=None, use_pregen
     advanced_steps = 0
     strategies_used = {}
     
-    for i in range(num_tests):
-        # Get a scrambled cube
-        if use_pregenerated and i < len(pregenerated_scrambles):
-            # Use a pregenerated scramble
-            cube = Cube()
-            scramble_data = pregenerated_scrambles[i]
-            scramble = scramble_data["scramble"]
-            
-            # Apply the scramble
-            cube.apply_algorithm(scramble)
-            scramble_str = scramble
-        else:
-            # Use random scrambles
-            cube = Cube()
-            for _ in range(scramble_moves):
-                move = random.choice(MOVES)
-                cube.apply_algorithm(move)
-            scramble_str = "Random scramble"
+    # Store failed scrambles for later processing
+    failed_scrambles = []
+    failed_cubes = []
+    
+    # First phase: Try standard solver on all scrambles
+    print("\n=== Phase 1: Testing Standard Solver ===")
+    for i, scramble_data in enumerate(scrambles):
+        # Get the scramble
+        scramble = scramble_data["scramble"]
         
-        # Test with standard approach
-        standard_cube = cube.copy()
-        env.cube = standard_cube
+        # Create a fresh cube and apply the scramble
+        cube = Cube()
+        if isinstance(scramble, str):
+            scramble_moves = scramble.split()
+        else:
+            scramble_moves = scramble
+        
+        for move in scramble_moves:
+            cube.apply_algorithm(move)
+        
+        scramble_str = " ".join(scramble_moves) if isinstance(scramble_moves, list) else scramble_moves
+        
+        # Solve with standard approach
+        env.cube = cube.copy()
         env.current_step = 0
         env.agent_moves = []
         state = env._get_state()
         
-        # Set up device
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
-        # Create and load model
-        state_size = 6 * 9 * 6
-        action_size = len(MOVES)
-        model = DQN(state_size, action_size).to(device)
-        model.load_state_dict(torch.load(model_path, map_location=device))
-        model.eval()
-        
-        # Solve with standard approach
         standard_solution = []
-        standard_solved_this = False
         steps = 0
         
-        while steps < 50:  # Max steps
+        while steps < max_steps:
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
             with torch.no_grad():
                 action = torch.argmax(model(state_tensor)).item()
@@ -1070,42 +1150,224 @@ def solve_benchmark(num_tests=100, scramble_moves=1, model_path=None, use_pregen
             
             if done and env.cube.is_solved():
                 standard_solved += 1
-                standard_solved_this = True
                 standard_steps += steps
                 break
             
             if done:
-                break
+                failed_scrambles.append(scramble_str)
+                failed_cubes.append(cube.copy())
         
-        # Test with advanced approach (only if standard failed)
-        if not standard_solved_this:
-            # Create fresh copy of the original scrambled cube
-            advanced_cube = cube.copy()
-            success, solution_moves, strategy = solve_with_retry(
-                scramble_cube=advanced_cube, 
-                model_path=model_path,
-                verbose=False
-            )
-            
-            if success:
-                advanced_solved += 1
-                advanced_steps += len(solution_moves)
-                strategies_used[strategy] = strategies_used.get(strategy, 0) + 1
-        
-        # Print progress
+        # Update progress
         if (i+1) % 10 == 0 or i == 0 or i == num_tests - 1:
             os.system('cls' if os.name == 'nt' else 'clear')
-            print(f"=== Benchmark Progress: {i+1}/{num_tests} ===")
-            print(f"Standard Solver: {standard_solved}/{i+1} ({standard_solved/(i+1)*100:.2f}%)")
-            print(f"Advanced Solver: {standard_solved + advanced_solved}/{i+1} ({(standard_solved + advanced_solved)/(i+1)*100:.2f}%)")
-            print(f"Improvement: +{advanced_solved} cubes (+{advanced_solved/(i+1)*100:.2f}%)")
+            print(f"=== Phase 1: Testing Standard Solver ===")
+            print(f"Progress: {i+1}/{num_tests} cubes tested")
+            print(f"Standard Solver Success: {standard_solved}/{i+1} ({standard_solved/(i+1)*100:.2f}%)")
+            if standard_solved > 0:
+                print(f"Average Standard Steps: {standard_steps/standard_solved:.2f}")
+    
+    # Final stats for phase 1
+    standard_success_rate = (standard_solved / num_tests) * 100
+    
+    # Initialize the advanced solver
+    solver = AdvancedCubeSolver(model_path=model_path, max_steps=max_steps)
+    
+    # Second phase: Try advanced strategies on failed scrambles
+    print("\n=== Phase 2: Testing Advanced Strategies on Failed Scrambles ===")
+    total_failures = len(failed_scrambles)
+    
+    if total_failures == 0:
+        print("No failures to recover! Standard solver solved all cubes.")
+    else:
+        print(f"Trying to recover {total_failures} failed scrambles with advanced strategies...")
+        
+        for i, (scramble_str, cube) in enumerate(zip(failed_scrambles, failed_cubes)):
+            os.system('cls' if os.name == 'nt' else 'clear')
+            
+            # Show overall progress stats at the top
+            advanced_success_rate = ((standard_solved + advanced_solved) / num_tests) * 100
+            improvement = advanced_success_rate - standard_success_rate
+            
+            print(f"=== Advanced Solver Progress ===")
+            print(f"Standard Solver: {standard_solved}/{num_tests} ({standard_success_rate:.2f}%)")
+            print(f"Advanced Solver: {standard_solved + advanced_solved}/{num_tests} ({advanced_success_rate:.2f}%)")
+            print(f"Improvement: +{improvement:.2f}%")
+            print(f"Failed scrambles remaining: {total_failures - i}/{total_failures}")
             
             if strategies_used:
                 print("\nStrategies Used:")
                 for strategy, count in strategies_used.items():
                     print(f"- {strategy}: {count} successes")
+            
+            print("\n=== Current Failed Scramble ===")
+            print(f"Scramble ({i+1}/{total_failures}): {scramble_str}")
+            
+            # Get kociemba solution length if possible
+            try:
+                kociemba_solution = koc.solve(cube.to_kociemba_string())
+                kociemba_length = len(kociemba_solution.split())
+                print(f"Optimal solution length (kociemba): {kociemba_length} moves")
+            except Exception:
+                print("Unable to determine optimal solution length")
+                
+            print("-" * 50)  # Divider line
+            
+            # Define a clean output handler class for the solving process
+            class SolveOutputManager:
+                def __init__(self):
+                    # Store a reference to the original print function
+                    import builtins
+                    self.original_print = builtins.print
+                    self.strategy_displayed = False
+                    
+                def show_strategy(self, tier, strategy, retry=None):
+                    # Clear previous strategy line if there was one
+                    if self.strategy_displayed:
+                        # Move cursor up 1 line and clear to end of line
+                        self.original_print("\033[1A\033[K", end="")
+                    
+                    # Show current strategy info
+                    if retry is None:
+                        self.original_print(f"Strategy: Tier {tier} - {strategy}")
+                    else:
+                        self.original_print(f"Strategy: Tier {tier} - {strategy} (Retry {retry})")
+                    
+                    self.strategy_displayed = True
+                
+                def clear_solver_output(self):
+                    # Clear multiple lines of solver output by using a clear screen below the header
+                    self.original_print("\033[J", end="")
+                    
+                def print_success(self, message):
+                    self.clear_solver_output()
+                    self.original_print(f"✓ {message}")
+                    
+                def print_failure(self, message):
+                    self.clear_solver_output()
+                    self.original_print(f"✗ {message}")
+            
+            # Create output manager
+            output_manager = SolveOutputManager()
+            
+            # Create a solver with the basic model
+            solver = AdvancedCubeSolver(model_path=model_path, max_steps=max_steps)
+            
+            # Dictionary to map strategy functions to their names and tier
+            strategy_info = {
+                "_standard_solve": ("Standard", 0),
+                "_random_restart_solve": ("Random Restart", 1),
+                "_temperature_explore_solve": ("Temperature Exploration", 1),
+                "_macro_operators_solve": ("Macro Operators", 2),
+                "_breadth_search_solve": ("Breadth Search", 2),
+                "_mcts_solve": ("Monte Carlo Tree Search", 3),
+                "_beam_search_solve": ("Beam Search", 3)
+            }
+            
+            # Try standard approach first
+            output_manager.show_strategy(0, "Standard")
+            success, solution_moves = solver._standard_solve(cube.copy(), verbose=False)
+            
+            if success:
+                output_manager.print_success(f"Solved with Standard approach in {len(solution_moves)} moves")
+                advanced_solved += 1
+                advanced_steps += len(solution_moves)
+                strategies_used["standard"] = strategies_used.get("standard", 0) + 1
+            else:
+                # Try all other strategies in order of tiers
+                strategy_tiers = [
+                    # Tier 1: Fast strategies
+                    [
+                        ("_random_restart_solve", 5), 
+                        ("_temperature_explore_solve", 5), 
+                    ],
+                    # Tier 2: Medium strategies 
+                    [
+                        ("_macro_operators_solve", 5),  
+                        ("_breadth_search_solve", 5),  
+                    ],
+                    # Tier 3: Slow, complex strategies
+                    [
+                        ("_mcts_solve", 5),  
+                        ("_beam_search_solve", 5),  
+                    ]
+                ]
+                
+                solved = False
+                
+                # Loop through each tier
+                for tier_idx, tier in enumerate(strategy_tiers):
+                    if solved:
+                        break
+                    
+                    # Loop through each strategy in the tier
+                    for strategy_name, max_retries in tier:
+                        if solved:
+                            break
+                        
+                        # Get the display name and tier from our mapping
+                        display_name = strategy_info[strategy_name][0]
+                        tier_num = tier_idx + 1  # Tier is 1-indexed for display
+                        
+                        # Show initial strategy
+                        output_manager.show_strategy(tier_num, display_name)
+                        
+                        # Get the strategy function
+                        strategy_fn = getattr(solver, strategy_name)
+                        
+                        # Try the strategy
+                        success, solution_moves = strategy_fn(cube.copy(), verbose=False)
+                        
+                        if success:
+                            solved = True
+                            output_manager.print_success(f"Solved with {display_name} approach in {len(solution_moves)} moves")
+                            advanced_solved += 1
+                            advanced_steps += len(solution_moves)
+                            strategies_used[display_name] = strategies_used.get(display_name, 0) + 1
+                            break
+                        
+                        # Try retries if needed
+                        for retry in range(1, max_retries):
+                            # Show retry
+                            output_manager.show_strategy(tier_num, display_name, retry)
+                            
+                            # Create retry params
+                            retry_params = {}
+                            if strategy_name == "_mcts_solve":
+                                retry_params["exploration_factor"] = 1.0 + (retry * 0.3)
+                            elif strategy_name == "_beam_search_solve":
+                                retry_params["beam_width"] = 3 + retry
+                            
+                            # Try with these parameters
+                            temp_env = CubeEnvironment(max_steps=max_steps)
+                            temp_env.cube = cube.copy()
+                            
+                            # Run the strategy - use the same solver but with retry params
+                            success, solution_moves = solver._run_strategy_with_params(
+                                strategy_fn, 
+                                cube.copy(), 
+                                retry_params, 
+                                verbose=False
+                            )
+                            
+                            if success:
+                                solved = True
+                                output_manager.print_success(f"Solved with {display_name} (Retry {retry}) in {len(solution_moves)} moves")
+                                advanced_solved += 1
+                                advanced_steps += len(solution_moves)
+                                strategy_key = f"{display_name} (retry {retry})"
+                                strategies_used[strategy_key] = strategies_used.get(strategy_key, 0) + 1
+                                break
+                
+                # If we tried everything and still couldn't solve it
+                if not solved:
+                    output_manager.print_failure("Failed to solve with any strategy")
+            
+            # Pause briefly to see the result before moving on
+            time.sleep(0.5)
     
     # Calculate final statistics
+    os.system('cls' if os.name == 'nt' else 'clear')
+    
     standard_success_rate = (standard_solved / num_tests) * 100
     advanced_success_rate = ((standard_solved + advanced_solved) / num_tests) * 100
     improvement = advanced_success_rate - standard_success_rate
@@ -1132,10 +1394,11 @@ def solve_benchmark(num_tests=100, scramble_moves=1, model_path=None, use_pregen
     print(f"Advanced Avg Steps when Standard Failed: {advanced_avg_steps:.2f}")
     print()
     
-    # New failure analysis section
+    # Failure analysis section
     print("=== Failure Analysis ===")
     print(f"Standard approach failed: {standard_failed} cubes ({standard_failed/num_tests*100:.2f}%)")
-    print(f"Advanced approach recovered: {recovered_from_failure} cubes ({recovered_from_failure/standard_failed*100:.2f}% of failures)")
+    if standard_failed > 0:
+        print(f"Advanced approach recovered: {recovered_from_failure} cubes ({recovered_from_failure/standard_failed*100:.2f}% of failures)")
     print(f"Remaining failures: {advanced_failed} cubes ({advanced_failed/num_tests*100:.2f}%)")
     print()
     
@@ -1196,6 +1459,8 @@ if __name__ == "__main__":
                         help='Number of test cases for benchmark (default: 100)')
     parser.add_argument('--scramble_moves', type=int, default=1,
                         help='Number of scramble moves for benchmark (default: 1)')
+    parser.add_argument('--max_steps', type=int, default=50,
+                        help='Maximum steps for solving attempts (default: 50)')
     parser.add_argument('--use_pregenerated', action='store_true',
                         help='Use pregenerated scrambles from scrambles folder')
     parser.add_argument('--interactive', action='store_true',
@@ -1209,12 +1474,14 @@ if __name__ == "__main__":
                 num_tests=args.tests, 
                 scramble_moves=args.scramble_moves,
                 model_path=args.model,
-                use_pregenerated=args.use_pregenerated
+                use_pregenerated=args.use_pregenerated,
+                max_steps=args.max_steps
             )
         elif args.scramble:
             success, solution, strategy = solve_with_retry(
                 scramble_sequence=args.scramble,
-                model_path=args.model
+                model_path=args.model,
+                max_steps=args.max_steps
             )
             if success:
                 print(f"\nSolution found using strategy: {strategy}")
@@ -1224,10 +1491,14 @@ if __name__ == "__main__":
         elif args.interactive:
             solve_from_input()
         else:
-            print("Please specify either --scramble, --benchmark, or --interactive.")
-            print("Example: python advanced_solver.py --scramble \"R U F'\"")
-            print("Example: python advanced_solver.py --benchmark --scramble_moves 3 --tests 50")
-            print("Example: python advanced_solver.py --interactive")
+            # Default to benchmark with the user's requested parameters
+            solve_benchmark(
+                num_tests=10000,  # t=10000
+                scramble_moves=7,  # n=7
+                max_steps=6,      # m=6
+                model_path=args.model,
+                use_pregenerated=args.use_pregenerated
+            )
     except FileNotFoundError as e:
         print(f"Error: {e}")
         print("Please train the model first using cube_rl.py.") 
