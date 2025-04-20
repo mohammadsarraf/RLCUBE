@@ -9,7 +9,13 @@ from cube_rl import CubeEnvironment, MOVES, DQN
 def find_latest_checkpoint():
     """Find the latest checkpoint file based on scramble difficulty"""
     checkpoints = []
-    for file in os.listdir():
+    # Look in modelCheckpoints directory instead of current directory
+    if not os.path.exists("modelCheckpoints"):
+        os.makedirs("modelCheckpoints", exist_ok=True)
+        print("Created modelCheckpoints directory")
+        return None
+        
+    for file in os.listdir("modelCheckpoints"):
         if file.startswith('cube_solver_model_scramble_') and file.endswith('.pt'):
             try:
                 # Extract scramble level from filename
@@ -23,7 +29,7 @@ def find_latest_checkpoint():
     
     # Sort by scramble level (descending) to get the most advanced model
     checkpoints.sort(reverse=True)
-    latest_checkpoint = checkpoints[0][1]
+    latest_checkpoint = os.path.join("modelCheckpoints", checkpoints[0][1])
     print(f"Found latest checkpoint for {checkpoints[0][0]} scramble moves: {latest_checkpoint}")
     return latest_checkpoint
 
