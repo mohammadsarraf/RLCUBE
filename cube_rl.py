@@ -1154,6 +1154,534 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000,
     
     return final_checkpoint
 
+def train_mixed_levels(level1, level2, mix_ratio=0.5, min_episodes=5000, max_episodes=10000, 
+                       target_success_rate=30, min_success_rate=None, batch_size=64, prev_checkpoint=None, 
+                       use_pregenerated=False, recent_window=1000, agent_config=None):
+    """
+    Train on a mix of two difficulty levels.
+    
+    Args:
+        level1: First difficulty level (lower)
+        level2: Second difficulty level (higher)
+        mix_ratio: Ratio of level2 vs level1 (0.5 means 50% level2, 50% level1)
+        min_episodes: Minimum number of episodes to train for
+        max_episodes: Maximum number of episodes to train for
+        target_success_rate: Target success rate to achieve before stopping training
+        min_success_rate: Minimum success rate to achieve regardless of episode count
+        batch_size: Batch size for training
+        prev_checkpoint: Path to previous checkpoint to load
+        use_pregenerated: Whether to use pregenerated scrambles
+        recent_window: Number of recent episodes to consider for success rate calculation
+        agent_config: Dictionary of DQNAgent configuration parameters
+    """
+    print(f"\n=== Starting mixed training with {level1} and {level2} scramble moves (ratio: {mix_ratio:.2f}) ===")
+    
+    # If min_success_rate is not specified, use target_success_rate
+    if min_success_rate is None:
+        min_success_rate = target_success_rate
+    
+    # For very high target rates (>90%), disable early stopping to ensure we reach the target
+    disable_early_stopping = target_success_rate >= 90
+
+    # Ensure scrambles exist if using pregenerated scrambles
+    if use_pregenerated:
+        for level in [level1, level2]:
+            if not ensure_scrambles_exist(level, use_pregenerated):
+                print(f"Warning: Could not generate scrambles for level {level}. Using random scrambles.")
+                use_pregenerated = False
+    
+    # Create environments for both difficulty levels
+    env1 = CubeEnvironment(scramble_moves=level1, use_pregenerated=use_pregenerated)
+    env2 = CubeEnvironment(scramble_moves=level2, use_pregenerated=use_pregenerated)
+    
+    # Create a set of environments with all difficulties up to the higher level
+    all_envs = {}
+    for i in range(1, max(level1, level2) + 1):
+        # Ensure scrambles exist for each difficulty level we'll use
+        if use_pregenerated and not ensure_scrambles_exist(i, use_pregenerated):
+            print(f"Warning: Could not generate scrambles for level {i}. Using random scrambles for this level.")
+            all_envs[i] = CubeEnvironment(scramble_moves=i, use_pregenerated=False)
+        else:
+            all_envs[i] = CubeEnvironment(scramble_moves=i, use_pregenerated=use_pregenerated)
+    
+    state_size = 6 * 9 * 6  # 6 faces, 9 stickers per face, 6 possible colors
+    action_size = len(MOVES)
+    
+    # Set default agent configuration if not provided
+    default_config = {
+        'learning_rate': 0.001,
+        'memory_size': 100000,
+        'gamma': 0.99,
+        'epsilon_start': 1.0,
+        'epsilon_min': 0.05,
+        'epsilon_decay': 0.995,
+        'target_update_freq': 1000,
+        'double_dqn': True,
+        'dueling_dqn': True,
+        'prioritized_replay': True,
+        'alpha': 0.6,
+        'beta': 0.4,
+        'beta_increment': 0.001,
+        'plateau_required': 5  # Default value for plateau detection
+    }
+    
+    # Override defaults with provided configuration
+    if agent_config:
+        default_config.update(agent_config)
+    
+    # Extract plateau detection parameter
+    plateau_required = default_config.get('plateau_required', 5)
+    print(f"Plateau detection will require {plateau_required} stable measurements")
+    
+    # Initialize agent with configuration
+    agent = DQNAgent(
+        state_size=state_size, 
+        action_size=action_size,
+        learning_rate=default_config['learning_rate'],
+        memory_size=default_config['memory_size'],
+        gamma=default_config['gamma'],
+        epsilon_start=default_config['epsilon_start'],
+        epsilon_min=default_config['epsilon_min'],
+        epsilon_decay=default_config['epsilon_decay'],
+        target_update_freq=default_config['target_update_freq'],
+        double_dqn=default_config['double_dqn'],
+        dueling_dqn=default_config['dueling_dqn'],
+        prioritized_replay=default_config['prioritized_replay'],
+        alpha=default_config['alpha'],
+        beta=default_config['beta'],
+        beta_increment=default_config['beta_increment']
+    )
+    
+    # Print agent configuration
+    print(f"Agent Configuration:")
+    for key, value in default_config.items():
+        print(f"  - {key}: {value}")
+    
+    # Load previous checkpoint if available
+    if prev_checkpoint:
+        try:
+            agent.policy_net.load_state_dict(torch.load(prev_checkpoint))
+            # Also load to target network
+            agent.target_net.load_state_dict(agent.policy_net.state_dict())
+            print(f"Loaded checkpoint from {prev_checkpoint}")
+            
+            # Use a lower epsilon when using a checkpoint to better utilize learned knowledge
+            agent.epsilon = 0.2  # 20% exploration when starting from a checkpoint
+            print(f"Training with mixed levels using moderate exploration (epsilon: {agent.epsilon:.4f})")
+        except Exception as e:
+            print(f"Failed to load checkpoint from {prev_checkpoint}, starting fresh: {e}")
+    
+    # Track episodes and success rates for both levels
+    solved_episodes = {level1: 0, level2: 0}
+    episodes_by_difficulty = {level1: 0, level2: 0}
+    
+    # Track all difficulties (including curriculum learning)
+    all_solved_by_difficulty = {i: 0 for i in range(1, max(level1, level2) + 1)}
+    all_episodes_by_difficulty = {i: 0 for i in range(1, max(level1, level2) + 1)}
+    
+    start_time = time.time()
+    episode = 0
+    
+    # Keep track of recent scrambles and outcomes
+    recent_scrambles = []  # Will store tuples of (scramble, outcome, moves)
+    
+    # Keep track of recent episodes for success rate calculation
+    # Separate tracking for each level
+    recent_episodes = {
+        level1: deque(maxlen=recent_window),
+        level2: deque(maxlen=recent_window)
+    }
+    recent_solved = {
+        level1: deque(maxlen=recent_window),
+        level2: deque(maxlen=recent_window)
+    }
+    
+    # Track training metrics
+    training_losses = []
+    avg_rewards = deque(maxlen=100)
+    
+    # Define the checkpoint names
+    mixed_name = f"{level1}_{level2}_mix{int(mix_ratio*100)}"
+    final_checkpoint = os.path.join("modelCheckpoints", f'cube_solver_model_mixed_{mixed_name}.pt')
+    best_checkpoint = os.path.join("modelCheckpoints", f'cube_solver_model_mixed_{mixed_name}_best.pt')
+    
+    # Variables for tracking best model
+    best_success_rate = {level1: 0, level2: 0}
+    best_combined_rate = 0
+    episodes_since_improvement = 0
+    patience = 500  # Number of episodes to wait for improvement before early stopping
+    
+    # Smart plateau detection parameters
+    success_rate_history = []  # Track success rates over time
+    plateau_window = 10  # Check last 10 chunks of 500 episodes each
+    plateau_chunk_size = 500  # Each chunk represents 500 episodes
+    plateau_threshold = 0.3  # Required improvement percentage points between chunks
+    stable_rate_count = 0  # Count of stable measurements
+    stable_rate_required = plateau_required  # Use the configurable parameter
+    
+    # Training loop
+    while (episode < max_episodes or (recent_success_rate_level2 < min_success_rate)):
+        episode += 1
+        
+        # Early stopping if no improvement for a long time and not disabled
+        if not disable_early_stopping and episodes_since_improvement > patience and episode > min_episodes:
+            print(f"No improvement for {patience} episodes. Early stopping at episode {episode}.")
+            print(f"Best combined success rate achieved: {best_combined_rate:.2f}%")
+            break
+            
+        # Distribute between the two main levels and curriculum learning
+        rand = random.random()
+        
+        if rand < mix_ratio:
+            # Use the higher difficulty level
+            selected_diff = level2
+            
+            # 30% chance of using an easier difficulty for curriculum learning when training on level2
+            if rand < mix_ratio * 0.3:
+                # Select from easier difficulties with preference toward harder ones
+                weights = [i/sum(range(1, level2)) for i in range(1, level2)]
+                selected_diff = random.choices(range(1, level2), weights=weights)[0]
+        else:
+            # Use the lower difficulty level
+            selected_diff = level1
+            
+            # 20% chance of using an even easier difficulty when training on level1
+            if rand < (1 - mix_ratio) * 0.2 and level1 > 1:
+                # Select from easier difficulties with preference toward harder ones
+                weights = [i/sum(range(1, level1)) for i in range(1, level1)]
+                selected_diff = random.choices(range(1, level1), weights=weights)[0]
+        
+        # Use the environment with selected difficulty
+        env_to_use = all_envs[selected_diff]
+        all_episodes_by_difficulty[selected_diff] += 1
+        
+        # Track episodes for our main levels
+        if selected_diff == level1:
+            episodes_by_difficulty[level1] += 1
+        elif selected_diff == level2:
+            episodes_by_difficulty[level2] += 1
+        
+        state = env_to_use.reset()
+        done = False
+        moves_taken = 0
+        episode_reward = 0
+        
+        # Get the scramble that was applied
+        scramble = " ".join(env_to_use.scramble_sequence) if env_to_use.scramble_sequence else "Random scramble"
+        
+        while not done:
+            action = agent.act(state)
+            next_state, reward, done = env_to_use.step(action)
+            agent.remember(state, action, reward, next_state, done)
+            state = next_state
+            moves_taken += 1
+            episode_reward += reward
+            
+            if done:
+                solved = env_to_use.cube.is_solved()
+                outcome = "Solved" if solved else "Failed"
+                
+                # Add to recent scrambles
+                recent_scrambles.append((scramble, outcome, moves_taken, episode_reward))
+                # Keep only the 5 most recent scrambles
+                if len(recent_scrambles) > 5:
+                    recent_scrambles.pop(0)
+                
+                # Track overall solve counts by difficulty
+                if solved:
+                    all_solved_by_difficulty[selected_diff] += 1
+                    
+                    # Track for our main levels
+                    if selected_diff == level1:
+                        solved_episodes[level1] += 1
+                    elif selected_diff == level2:
+                        solved_episodes[level2] += 1
+                        
+                # Track recent episodes (only for the main difficulty levels)
+                if selected_diff == level1:
+                    recent_episodes[level1].append(1)
+                    recent_solved[level1].append(1 if solved else 0)
+                    avg_rewards.append(episode_reward)
+                elif selected_diff == level2:
+                    recent_episodes[level2].append(1)
+                    recent_solved[level2].append(1 if solved else 0)
+                    avg_rewards.append(episode_reward)
+                break
+        
+        # Train the agent with experiences from memory
+        loss = agent.replay(batch_size)
+        training_losses.append(loss)
+        
+        # Print progress and check success rate every 100 episodes
+        if episode % 100 == 0 or episode == 1:
+            # Calculate success rates for both main levels
+            success_rate_level1 = 0
+            success_rate_level2 = 0
+            
+            if episodes_by_difficulty[level1] > 0:
+                success_rate_level1 = (solved_episodes[level1] / episodes_by_difficulty[level1]) * 100
+            
+            if episodes_by_difficulty[level2] > 0:
+                success_rate_level2 = (solved_episodes[level2] / episodes_by_difficulty[level2]) * 100
+            
+            # Calculate recent success rates
+            recent_success_rate_level1 = 0
+            recent_success_rate_level2 = 0
+            
+            if len(recent_episodes[level1]) > 0:
+                recent_success_rate_level1 = (sum(recent_solved[level1]) / len(recent_episodes[level1])) * 100
+            
+            if len(recent_episodes[level2]) > 0:
+                recent_success_rate_level2 = (sum(recent_solved[level2]) / len(recent_episodes[level2])) * 100
+            
+            # Calculate average reward
+            avg_reward = sum(avg_rewards) / len(avg_rewards) if avg_rewards else 0
+            
+            # Calculate overall success rate (weighted by mix ratio)
+            combined_rate = ((1-mix_ratio) * recent_success_rate_level1 + 
+                             mix_ratio * recent_success_rate_level2)
+            
+            # Update best model if improved
+            improved = False
+            
+            # Track improvements for each level
+            if recent_success_rate_level1 > best_success_rate[level1] and len(recent_episodes[level1]) >= 100:
+                best_success_rate[level1] = recent_success_rate_level1
+                improved = True
+                
+            if recent_success_rate_level2 > best_success_rate[level2] and len(recent_episodes[level2]) >= 100:
+                best_success_rate[level2] = recent_success_rate_level2
+                improved = True
+            
+            # Calculate combined rate for model saving
+            if combined_rate > best_combined_rate and min(len(recent_episodes[level1]), len(recent_episodes[level2])) >= 100:
+                best_combined_rate = combined_rate
+                torch.save(agent.policy_net.state_dict(), best_checkpoint)
+                print(f"\nNew best model saved with combined success rate: {best_combined_rate:.2f}%")
+                episodes_since_improvement = 0
+            elif improved:
+                episodes_since_improvement = 0
+            else:
+                episodes_since_improvement += 100
+            
+            # Store success rate history for plateau detection (every 500 episodes)
+            if episode % 500 == 0:
+                success_rate_history.append(combined_rate)
+                
+                # Only start checking for plateau after we have enough data points
+                if len(success_rate_history) >= plateau_window:
+                    # Keep only the most recent measurements
+                    if len(success_rate_history) > plateau_window:
+                        success_rate_history = success_rate_history[-plateau_window:]
+                    
+                    # Check if success rate has plateaued
+                    improving = False
+                    
+                    # Calculate average improvement over the last several chunks
+                    improvements = [success_rate_history[i] - success_rate_history[i-1] 
+                                   for i in range(1, len(success_rate_history))]
+                    avg_improvement = sum(improvements) / len(improvements)
+                    
+                    # Check the trend in the last few measurements
+                    recent_improvements = improvements[-3:] if len(improvements) >= 3 else improvements
+                    recent_avg_improvement = sum(recent_improvements) / len(recent_improvements)
+                    
+                    # Detect if we're improving at a meaningful rate
+                    if recent_avg_improvement >= plateau_threshold or avg_improvement >= plateau_threshold * 0.7:
+                        improving = True
+                        stable_rate_count = 0  # Reset stability counter if still improving
+                    
+                    # If we've reached a good success rate and improvement has plateaued
+                    if not improving and combined_rate >= 50:  # Only consider plateau if success rate is decent
+                        stable_rate_count += 1
+                        
+                        # Log plateau detection progress
+                        remaining = stable_rate_required - stable_rate_count
+                        if remaining > 0:
+                            print(f"\nPlateau detection: Success rate has stabilized around {combined_rate:.2f}%")
+                            print(f"Recent improvement rate: {recent_avg_improvement:.2f}% per {plateau_chunk_size} episodes")
+                            print(f"Will confirm plateau in {remaining} more measurement{'s' if remaining > 1 else ''}")
+                        
+                        # If we've confirmed a plateau and no significant improvement for a while
+                        if stable_rate_count >= stable_rate_required:
+                            # If we're already at a good success rate, consider this the maximum achievable
+                            if combined_rate >= 75:  # 75% is generally a good success rate
+                                print(f"\n=== PLATEAU DETECTED ===")
+                                print(f"Success rate has stabilized at {combined_rate:.2f}% after {episode} episodes")
+                                print(f"This appears to be the maximum achievable rate")
+                                print(f"Target rate of {target_success_rate}% may not be achievable")
+                                print(f"Stopping training and saving best model with success rate: {best_combined_rate:.2f}%")
+                                
+                                # Update the log file to indicate why we stopped
+                                plateau_reason = f"Training stopped due to plateau detection. Maximum achievable rate appears to be ~{combined_rate:.2f}%"
+                                
+                                break
+                    else:
+                        stable_rate_count = 0  # Reset if we're still improving or success rate is too low
+            
+            # Clear screen for cleaner display
+            os.system('cls' if os.name == 'nt' else 'clear')
+            
+            # Display training progress
+            print(f"=== Mixed Training Progress === - Levels: {level1} and {level2} (Mix ratio: {mix_ratio:.2f})")
+            print(f"  - Episode: {episode}/{max_episodes if episode <= max_episodes else 'unlimited until '+str(min_success_rate)+'% success'}")
+            print(f"  - Min Episodes: {min_episodes} - Max Episodes: {max_episodes}")
+            print(f"  - Target Success Rate: {target_success_rate}% - Min Success Rate: {min_success_rate}%")
+            print(f"  - Batch Size: {batch_size} - Using Pregenerated Scrambles: {use_pregenerated}")
+            print(f"  - Previous Checkpoint: {prev_checkpoint if prev_checkpoint else 'None'}")
+            print("=" * 50)
+            
+            # Performance metrics
+            print(f"Performance Summary:")
+            print(f"✓ Level {level1} Success Rate: {success_rate_level1:.2f}% (Recent: {recent_success_rate_level1:.2f}%)")
+            print(f"✓ Level {level2} Success Rate: {success_rate_level2:.2f}% (Recent: {recent_success_rate_level2:.2f}%)")
+            print(f"✓ Combined Success Rate: {combined_rate:.2f}%")
+            print(f"✓ Best Combined Success Rate: {best_combined_rate:.2f}%") 
+            print(f"✓ Average Reward: {avg_reward:.2f}")
+            print(f"✓ Average Loss: {sum(training_losses[-100:]) / len(training_losses[-100:]) if training_losses else 0:.4f}")
+            print(f"✓ Exploration Rate (Epsilon): {agent.epsilon:.4f}")
+            print(f"✓ Memory Size: {agent.get_memory_length()}")
+            print(f"✓ Episodes Since Last Improvement: {episodes_since_improvement}")
+            print()
+            
+            # Level statistics
+            print(f"Level Statistics:")
+            # Main levels first
+            main_stats = [
+                f"L{level1}: {solved_episodes[level1]}/{episodes_by_difficulty[level1]} ({(solved_episodes[level1]/episodes_by_difficulty[level1])*100:.1f}% success)" if episodes_by_difficulty[level1] > 0 else f"L{level1}: No episodes yet",
+                f"L{level2}: {solved_episodes[level2]}/{episodes_by_difficulty[level2]} ({(solved_episodes[level2]/episodes_by_difficulty[level2])*100:.1f}% success)" if episodes_by_difficulty[level2] > 0 else f"L{level2}: No episodes yet"
+            ]
+            
+            # Then all difficulties
+            all_stats = [f"D{d}: {all_solved_by_difficulty[d]}/{all_episodes_by_difficulty[d]} "
+                         f"({(all_solved_by_difficulty[d]/all_episodes_by_difficulty[d])*100:.1f}%)" 
+                         for d in sorted(all_solved_by_difficulty.keys()) 
+                         if all_episodes_by_difficulty[d] > 0]
+            
+            for stat in main_stats:
+                print(stat)
+            print("All difficulties:")
+            for stat in all_stats:
+                print(stat)
+            print()
+            
+            # Recent scrambles
+            print(f"Last {len(recent_scrambles)} Scrambles:")
+            for i, (scr, out, mvs, rew) in enumerate(recent_scrambles):
+                print(f"- {scr} ({out} in {mvs} moves, reward: {rew:.1f})")
+                
+            # Save intermediate checkpoint, replacing the previous one
+            if episode % 1000 == 0:
+                torch.save(agent.policy_net.state_dict(), final_checkpoint)
+                print(f"\nSaved checkpoint: {final_checkpoint}")
+        
+        # Check if we've met the success criteria
+        if episode >= min_episodes:
+            # Calculate the current combined rate
+            current_combined_rate = 0
+            
+            # Make sure we have enough episodes to have a meaningful measurement
+            if len(recent_episodes[level1]) >= 200 and len(recent_episodes[level2]) >= 200:
+                current_combined_rate = ((1-mix_ratio) * sum(recent_solved[level1]) / len(recent_episodes[level1]) * 100 + 
+                                     mix_ratio * sum(recent_solved[level2]) / len(recent_episodes[level2]) * 100)
+                                     
+                # We prioritize level2 success rate but also need a decent level1 rate
+                current_success_rate_level2 = sum(recent_solved[level2]) / len(recent_episodes[level2]) * 100
+                current_success_rate_level1 = sum(recent_solved[level1]) / len(recent_episodes[level1]) * 100
+                
+                # Check if success criteria are met
+                if (current_success_rate_level2 >= target_success_rate and
+                    current_success_rate_level1 >= 75):  # Level1 should be quite high
+                    print(f"\nReached target success rate on both levels! Level {level1}: {current_success_rate_level1:.2f}%, Level {level2}: {current_success_rate_level2:.2f}%")
+                    break
+                elif (current_success_rate_level2 >= min_success_rate and 
+                      current_success_rate_level1 >= 70 and
+                      best_combined_rate >= target_success_rate):
+                    # If we've reached minimum rate and previously hit the target rate
+                    print(f"\nReached minimum success rates with best at {best_combined_rate:.2f}% (target: {target_success_rate}%)")
+                    break
+    
+    # Save final model
+    torch.save(agent.policy_net.state_dict(), final_checkpoint)
+    total_time = time.time() - start_time
+    
+    # Determine stopping reason for logging
+    if 'plateau_reason' in locals():
+        stopping_reason = plateau_reason
+    elif combined_rate >= target_success_rate:
+        stopping_reason = f"Reached target success rate of {target_success_rate}%"
+    elif episodes_since_improvement > patience and not disable_early_stopping:
+        stopping_reason = f"Early stopping due to no improvement for {patience} episodes"
+    elif episode >= max_episodes:
+        stopping_reason = f"Reached maximum number of episodes: {max_episodes}"
+    else:
+        stopping_reason = "Training completed normally"
+    
+    print(f"\nMixed training completed. Levels: {level1} and {level2}, "
+          f"Episodes: {episode}, Level {level1} Success: {success_rate_level1:.2f}%, "
+          f"Level {level2} Success: {success_rate_level2:.2f}%, "
+          f"Time: {total_time:.2f} seconds.")
+    print(f"Stopping reason: {stopping_reason}")
+    
+    # Calculate level statistics for logging
+    level_stats = []
+    # Main levels first  
+    if episodes_by_difficulty[level1] > 0:
+        level_stats.append(f"Level {level1}: {solved_episodes[level1]}/{episodes_by_difficulty[level1]} "
+                    f"({(solved_episodes[level1]/episodes_by_difficulty[level1])*100:.1f}%)")
+    if episodes_by_difficulty[level2] > 0:
+        level_stats.append(f"Level {level2}: {solved_episodes[level2]}/{episodes_by_difficulty[level2]} "
+                    f"({(solved_episodes[level2]/episodes_by_difficulty[level2])*100:.1f}%)")
+    
+    # Then all difficulties
+    for d in sorted(all_solved_by_difficulty.keys()):
+        if all_episodes_by_difficulty[d] > 0:
+            level_stats.append(f"Difficulty {d}: {all_solved_by_difficulty[d]}/{all_episodes_by_difficulty[d]} "
+                      f"({(all_solved_by_difficulty[d]/all_episodes_by_difficulty[d])*100:.1f}%)")
+    
+    # Calculate average loss for logging
+    avg_loss = sum(training_losses[-100:]) / len(training_losses[-100:]) if training_losses else 0
+    
+    # Calculate average reward for logging
+    avg_reward = sum(avg_rewards) / len(avg_rewards) if avg_rewards else 0
+    
+    # Log training results to file
+    log_file = log_training_results(
+        scramble_moves=f"{level1}-{level2} mix",
+        episode=episode,
+        solved_episodes=solved_episodes[level2],  # Report higher level successes
+        total_episodes=episodes_by_difficulty[level2],
+        success_rate=success_rate_level2,
+        recent_success_rate=recent_success_rate_level2,
+        time_taken=total_time,
+        agent_config=default_config,
+        level_stats=level_stats,
+        recent_scrambles=recent_scrambles,
+        avg_reward=avg_reward,
+        avg_loss=avg_loss,
+        epsilon=agent.epsilon,
+        memory_size=agent.get_memory_length(),
+        best_success_rate=best_combined_rate,
+        episodes_since_improvement=episodes_since_improvement,
+        stopping_reason=stopping_reason
+    )
+    
+    # Use the best model if we have one
+    if os.path.exists(best_checkpoint) and best_combined_rate > combined_rate:
+        print(f"Loading best model with combined success rate {best_combined_rate:.2f}% for testing")
+        agent.policy_net.load_state_dict(torch.load(best_checkpoint))
+        # Copy best model to final checkpoint
+        torch.save(agent.policy_net.state_dict(), final_checkpoint)
+    
+    # Test on both difficulty levels
+    print(f"\n=== Testing agent on level {level1} ===")
+    test_agent(num_tests=30, scramble_moves=level1, checkpoint_path=final_checkpoint, use_pregenerated=use_pregenerated)
+    
+    print(f"\n=== Testing agent on level {level2} ===")
+    test_agent(num_tests=30, scramble_moves=level2, checkpoint_path=final_checkpoint, use_pregenerated=use_pregenerated)
+    
+    return final_checkpoint
+
 def progressive_training(start_level=None, max_scramble=20, min_episodes=5000, 
                          max_episodes=10000, target_success_rate=30, min_success_rate=None, batch_size=64,
                          use_pregenerated=True, custom_checkpoint=None, recent_window=1000, agent_config=None):
@@ -1431,6 +1959,16 @@ if __name__ == "__main__":
     # Set defaults for advanced features
     parser.set_defaults(double_dqn=True, dueling_dqn=True, prioritized_replay=True)
     
+    # Add new arguments for mixed training
+    parser.add_argument('--mixed', action='store_true',
+                        help='Train on a mix of two difficulty levels')
+    parser.add_argument('--level1', type=int, default=6,
+                        help='First difficulty level for mixed training (lower)')
+    parser.add_argument('--level2', type=int, default=7,
+                        help='Second difficulty level for mixed training (higher)')
+    parser.add_argument('--mix_ratio', type=float, default=0.5,
+                        help='Ratio of level2 vs level1 (0.5 means 50% level2, 50% level1)')
+    
     args = parser.parse_args()
     
     # Build agent configuration
@@ -1468,6 +2006,38 @@ if __name__ == "__main__":
             checkpoint_path=checkpoint, 
             use_pregenerated=args.use_pregenerated
         )
+    elif args.mixed:
+        # Build agent configuration
+        agent_config = {
+            'learning_rate': args.lr,
+            'memory_size': args.memory_size,
+            'gamma': args.gamma,
+            'epsilon_start': args.epsilon_start,
+            'epsilon_min': args.epsilon_min,
+            'epsilon_decay': args.epsilon_decay,
+            'target_update_freq': args.target_update,
+            'double_dqn': args.double_dqn,
+            'dueling_dqn': args.dueling_dqn,
+            'prioritized_replay': args.prioritized_replay,
+            'alpha': args.alpha,
+            'beta': args.beta
+        }
+        
+        # Run mixed training
+        train_mixed_levels(
+            level1=args.level1,
+            level2=args.level2,
+            mix_ratio=args.mix_ratio,
+            min_episodes=args.min_episodes,
+            max_episodes=args.max_episodes,
+            target_success_rate=args.target_rate,
+            min_success_rate=args.min_rate,
+            batch_size=args.batch_size,
+            use_pregenerated=args.use_pregenerated,
+            custom_checkpoint=args.model,
+            recent_window=args.recent_window,
+            agent_config=agent_config
+        )
     else:
         # Run progressive training with specified or default parameters
         progressive_training(
@@ -1496,6 +2066,9 @@ if __name__ == "__main__":
     
     print("\n# Progressive training from level 1 to 10:")
     print("python cube_rl.py --max_level 10 --min_episodes 5000 --target_rate 50 --use_pregenerated --memory_size 200000")
+    
+    print("\n# Train with mixed difficulty (level 6 and 7 with 50% mix):")
+    print("python cube_rl.py --mixed --level1 6 --level2 7 --mix_ratio 0.5 --min_episodes 10000 --max_episodes 30000 --target_rate 5 --use_pregenerated")
     
     # To test the latest checkpoint:
     # test_agent(num_tests=100, scramble_moves=5, checkpoint_path="cube_solver_model_scramble_5.pt", use_pregenerated=True) 
