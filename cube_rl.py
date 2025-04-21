@@ -890,14 +890,20 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000,
             break
             
         # Distribution of difficulties:
-        # 70% current difficulty, 30% distributed among easier difficulties
-        if scramble_moves == 1 or random.random() < 0.7:
-            # Use current difficulty most of the time
+        # 30% current difficulty, 50% previous level, 20% distributed among easier difficulties
+        if scramble_moves == 1:
+            # For level 1, always use current difficulty
             selected_diff = scramble_moves
+        elif random.random() < 0.3:
+            # 30% chance to use current difficulty
+            selected_diff = scramble_moves
+        elif random.random() < 0.8 and scramble_moves > 1:
+            # 50% chance to use previous level (when available)
+            selected_diff = scramble_moves - 1
         else:
-            # Select from easier difficulties with preference toward harder ones
-            weights = [i/sum(range(1, scramble_moves)) for i in range(1, scramble_moves)]
-            selected_diff = random.choices(range(1, scramble_moves), weights=weights)[0]
+            # 20% chance to select from easier difficulties with preference toward harder ones
+            weights = [i/sum(range(1, scramble_moves-1)) for i in range(1, scramble_moves-1)]
+            selected_diff = random.choices(range(1, scramble_moves-1), weights=weights)[0]
         
         # Use the environment with selected difficulty
         env_to_use = all_envs[selected_diff]

@@ -24,7 +24,7 @@ improve:
 
 # New parallel training commands
 parallel_train:
-	python parallel_cube_rl.py --mode train --level $(s) --max_level $(e) --min_rate $(r) --use_pregenerated --target_rate 100 --min_episodes 25000 --batch_size 128 --recent_window $(w) --processes $(p)
+	python parallel_cube_rl.py --mode train --level $(s) --max_level $(e) --min_rate $(r) --use_pregenerated --target_rate 100 --min_episodes 50000 --batch_size 256 --recent_window $(w) --processes $(p)
 
 parallel_improve:
 	python parallel_cube_rl.py --mode improve --levels $(l) --min_rate $(r) --batch_size $(batch_size) --use_pregenerated --target_rate 100 --processes $(p) --recent_window $(w) --memory_size $(memory_size) --gamma $(gamma) --lr $(lr) --epsilon_min $(epsilon_min) --plat $(plat)
