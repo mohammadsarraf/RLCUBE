@@ -27,7 +27,7 @@ parallel_train:
 	python parallel_cube_rl.py --mode train --level $(s) --max_level $(e) --min_rate $(r) --use_pregenerated --target_rate 100 --min_episodes 50000 --batch_size 128 --recent_window $(w) --processes $(p)
 
 parallel_improve:
-	python parallel_cube_rl.py --mode improve --levels $(l) --min_rate $(r) --batch_size 128 --use_pregenerated --target_rate 100 --processes $(p)
+	python parallel_cube_rl.py --mode improve --levels $(l) --min_rate $(r) --batch_size $(batch_size) --use_pregenerated --target_rate 100 --processes $(p) --recent_window $(w) --memory_size $(memory_size) --gamma $(gamma) --lr $(lr) --epsilon_min $(epsilon_min) --plat $(plat)
 
 parallel_test:
 	python parallel_cube_rl.py --mode test --test_level $(n) --num_tests $(t) --use_pregenerated

@@ -786,12 +786,17 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000,
         'prioritized_replay': True,
         'alpha': 0.6,
         'beta': 0.4,
-        'beta_increment': 0.001
+        'beta_increment': 0.001,
+        'plateau_required': 5  # Default value for plateau detection
     }
     
     # Override defaults with provided configuration
     if agent_config:
         default_config.update(agent_config)
+    
+    # Extract plateau detection parameter
+    plateau_required = default_config.get('plateau_required', 5)
+    print(f"Plateau detection will require {plateau_required} stable measurements")
     
     # Initialize agent with configuration
     agent = DQNAgent(
@@ -871,7 +876,7 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000,
     plateau_chunk_size = 500  # Each chunk represents 500 episodes
     plateau_threshold = 0.3  # Required improvement percentage points between chunks
     stable_rate_count = 0  # Count of stable measurements
-    stable_rate_required = 5  # How many stable measurements needed to confirm plateau
+    stable_rate_required = plateau_required  # Use the configurable parameter
     
     # Training loop - continue until we reach target success rate or max episodes
     # Also ensure we continue training if we haven't reached min_success_rate

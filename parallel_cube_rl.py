@@ -123,7 +123,7 @@ def parallel_progressive_training(start_level=None, max_level=5, min_episodes=50
 def parallel_improve_levels(levels=None, min_episodes=3000, max_episodes=8000, 
                            target_success_rate=95, min_success_rate=90, batch_size=64,
                            use_pregenerated=True, recent_window=1000, agent_config=None,
-                           num_processes=None):
+                           num_processes=None, plateau_required=5):
     """
     Improve multiple checkpoint levels in parallel
     This function focuses on improving already trained models instead of training from scratch
@@ -153,6 +153,7 @@ def parallel_improve_levels(levels=None, min_episodes=3000, max_episodes=8000,
     num_processes = min(num_processes, len(levels))
     
     print(f"Starting parallel improvement for levels {levels} with {num_processes} processes")
+    print(f"Plateau detection requires {plateau_required} stable measurements")
     
     # Create and start processes
     processes = []
@@ -171,7 +172,8 @@ def parallel_improve_levels(levels=None, min_episodes=3000, max_episodes=8000,
             'learning_rate': 0.0005,  # Lower learning rate for fine-tuning
             'epsilon_start': 0.1,     # Lower initial exploration
             'epsilon_min': 0.01,      # Lower minimum exploration
-            'epsilon_decay': 0.998    # Slower decay
+            'epsilon_decay': 0.998,   # Slower decay
+            'plateau_required': plateau_required  # Add the plateau parameter
         })
         
         # Create process arguments
@@ -246,6 +248,10 @@ def main():
     parser.add_argument('--target_update', type=int, default=1000,
                         help='How often to update target network (steps)')
     
+    # Plateau detection parameter
+    parser.add_argument('--plat', type=int, default=5,
+                        help='Number of stable measurements required to detect a plateau')
+    
     # Advanced DQN features
     parser.add_argument('--no_double_dqn', action='store_false', dest='double_dqn',
                         help='Disable Double DQN (use regular DQN)')
@@ -296,14 +302,7 @@ def main():
             num_processes=args.processes
         )
     elif args.mode == 'improve':
-        # Parse levels if provided
-        levels = None
-        if args.levels:
-            try:
-                levels = [int(l) for l in args.levels.split(',')]
-            except ValueError:
-                print("Error: Invalid level format. Use comma-separated integers, e.g., '1,2,3'")
-                sys.exit(1)
+        levels = [int(level) for level in args.levels.split(',')] if args.levels else None
         
         parallel_improve_levels(
             levels=levels,
@@ -315,7 +314,8 @@ def main():
             use_pregenerated=args.use_pregenerated,
             recent_window=args.recent_window,
             agent_config=agent_config,
-            num_processes=args.processes
+            num_processes=args.processes,
+            plateau_required=args.plat
         )
     elif args.mode == 'test':
         if args.test_level is None:
