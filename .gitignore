@@ -1,0 +1,4 @@
+./data/scramble
+./data/output
+__pycache__
+src/__pycache__

@@ -14,7 +14,7 @@ import subprocess  # For calling gen.py
 import sys
 
 # Create modelCheckpoints directory if it doesn't exist
-os.makedirs("modelCheckpoints", exist_ok=True)
+os.makedirs("data/modelCheckpoints", exist_ok=True)
 
 # Define possible moves
 MOVES = ["U", "U'", "U2", "D", "D'", "D2", "L", "L'", "L2", "R", "R'", "R2", "F", "F'", "F2", "B", "B'", "B2"]
@@ -612,7 +612,7 @@ class DQNAgent:
 def find_latest_checkpoint_level():
     """Find the highest difficulty level with an existing checkpoint"""
     max_level = 0
-    for file in os.listdir("modelCheckpoints"):
+    for file in os.listdir("data/modelCheckpoints"):
         if file.startswith('cube_solver_model_scramble_') and file.endswith('.pt'):
             try:
                 # Extract scramble level from filename
@@ -631,7 +631,7 @@ def ensure_scrambles_exist(scramble_moves, use_pregenerated=False):
         return True  # No need to check if not using pregenerated scrambles
         
     # Check if scramble file exists
-    filepath = os.path.join("scrambles", f"{scramble_moves}movescramble.txt")
+    filepath = os.path.join("data/scramble", f"{scramble_moves}movescramble.txt")
     if os.path.exists(filepath):
         # Check if file has content
         with open(filepath, 'r') as f:
@@ -862,8 +862,8 @@ def train_specific_level(scramble_moves, min_episodes=5000, max_episodes=10000,
     avg_rewards = deque(maxlen=100)
     
     # Define the final checkpoint name for this difficulty level
-    final_checkpoint = os.path.join("modelCheckpoints", f'cube_solver_model_scramble_{scramble_moves}.pt')
-    best_checkpoint = os.path.join("modelCheckpoints", f'cube_solver_model_scramble_{scramble_moves}_best.pt')
+    final_checkpoint = os.path.join("data/modelCheckpoints", f'cube_solver_model_scramble_{scramble_moves}.pt')
+    best_checkpoint = os.path.join("data/modelCheckpoints", f'cube_solver_model_scramble_{scramble_moves}_best.pt')
     
     # Variables for tracking best model
     best_success_rate = 0
@@ -1190,7 +1190,7 @@ def progressive_training(start_level=None, max_scramble=20, min_episodes=5000,
     # load the checkpoint from the previous level
     if checkpoint is None and start_level > 1:
         prev_level = start_level - 1
-        prev_checkpoint = os.path.join("modelCheckpoints", f'cube_solver_model_scramble_{prev_level}.pt')
+        prev_checkpoint = os.path.join("data/modelCheckpoints", f'cube_solver_model_scramble_{prev_level}.pt')
         if os.path.exists(prev_checkpoint):
             checkpoint = prev_checkpoint
             print(f"Will use checkpoint from level {prev_level}: {prev_checkpoint}")
@@ -1455,7 +1455,7 @@ if __name__ == "__main__":
             print("Error: --test_level must be specified with --test_only")
             sys.exit(1)
         if args.model is None:
-            checkpoint = os.path.join("modelCheckpoints", f'cube_solver_model_scramble_{args.test_level}.pt')
+            checkpoint = os.path.join("data/modelCheckpoints", f'cube_solver_model_scramble_{args.test_level}.pt')
             if not os.path.exists(checkpoint):
                 print(f"Error: No checkpoint found for level {args.test_level}. Please specify --model.")
                 sys.exit(1)
