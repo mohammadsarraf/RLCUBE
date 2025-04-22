@@ -4,7 +4,7 @@ import random
 import os
 import json
 from cube import Cube
-from cube_rl import CubeEnvironment, MOVES, DQN
+from rl_agent import CubeEnvironment, MOVES, DQN
 
 def find_latest_checkpoint():
     """Find the latest checkpoint file based on scramble difficulty"""

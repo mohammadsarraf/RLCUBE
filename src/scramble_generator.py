@@ -40,10 +40,10 @@ def generate_scramble(length):
 def generate_scrambles_for_level(n, target_count=50000):
     """Generate scrambles for a specific difficulty level and save to a file"""
     # Make sure scrambles directory exists
-    os.makedirs("scrambles", exist_ok=True)
+    os.makedirs("data/scrambles", exist_ok=True)
     
     # Output file path
-    output_file = os.path.join("scrambles", f"{n}movescramble.txt")
+    output_file = os.path.join("data/scrambles", f"{n}movescramble.txt")
     
     print(f"Generating {target_count} scrambles with solution length {n}...")
     print(f"Will save to {output_file}")

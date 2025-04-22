@@ -11,7 +11,7 @@ test:
 
 .PHONY: train
 train:
-	python src/cube_rl.py --level $(n) --max_level $(n) --min_rate $(r) --use_pregenerated --target_rate 100 --min_episodes 50000 --batch_size 128 --recent_window 10000
+	python src/rl_agent.py --level $(n) --max_level $(n) --min_rate $(r) --use_pregenerated --target_rate 100 --min_episodes 50000 --batch_size 128 --recent_window 10000
 
 
 .PHONY: input
@@ -26,7 +26,7 @@ advance:
 
 .PHONY: improve
 improve:
-	python src/cube_rl.py --level "$(n)" --max_level "$(n)" --min_rate "$(r)" --batch_size 128 --use_pregenerated --target_rate 100 --model "data/modelCheckpoints/cube_solver_model_scramble_$(n).pt"
+	python src/rl_agent.py --level "$(n)" --max_level "$(n)" --min_rate "$(r)" --batch_size 128 --use_pregenerated --target_rate 100 --model "data/modelCheckpoints/cube_solver_model_scramble_$(n).pt"
 
 
 .PHONY: parallel_train
@@ -51,6 +51,6 @@ gen:
 		exit 1; \
 	fi; \
 	for i in $(shell seq $$(($(n))) $$(($(m)))); do \
-		echo "python src/gen.py --level $$i --count 50000"; \
-		python src/gen.py --level $$i --count 50000; \
+		echo "python src/scramble_generator.py --level $$i --count 50000"; \
+		python src/scramble_generator.py --level $$i --count 50000; \
 	done

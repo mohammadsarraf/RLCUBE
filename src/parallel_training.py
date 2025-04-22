@@ -8,7 +8,7 @@ from functools import partial
 import numpy as np
 
 # Import from existing cube_rl module
-from cube_rl import (
+from rl_agent import (
     train_specific_level, 
     progressive_training,
     test_agent,

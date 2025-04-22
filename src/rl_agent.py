@@ -45,16 +45,16 @@ class CubeEnvironment:
         self.pregenerated_scrambles = []
         
         # Create scrambles directory if it doesn't exist
-        os.makedirs("scrambles", exist_ok=True)
+        os.makedirs("data/scrambles", exist_ok=True)
         
         # Define path to scramble file
-        filepath = os.path.join("scrambles", f"{num_moves}movescramble.txt")
+        filepath = os.path.join("data/scrambles", f"{num_moves}movescramble.txt")
         
         # Check if scramble file exists, generate if it doesn't
         if not os.path.exists(filepath) and self.use_pregenerated:
             print(f"Scramble file {filepath} not found. Generating now...")
             try:
-                subprocess.run(["python", "gen.py", "--level", str(num_moves)], check=True)
+                subprocess.run(["python", "src/scramble_generator.py", "--level", str(num_moves)], check=True)
                 if not os.path.exists(filepath):
                     print(f"Failed to generate scramble file. Will use random scrambles instead.")
                     self.use_pregenerated = False
@@ -98,7 +98,7 @@ class CubeEnvironment:
                 print(f"\nUsed all {len(self.pregenerated_scrambles)} scrambles. Generating a new set...")
                 try:
                     # Generate new scrambles
-                    subprocess.run(["python", "gen.py", "--level", str(self.scramble_moves)], check=True)
+                    subprocess.run(["python", "src/scramble_generator.py", "--level", str(self.scramble_moves)], check=True)
                     # Reset counter
                     self.scramble_usage_count = 0
                     # Reload scrambles
@@ -631,7 +631,7 @@ def ensure_scrambles_exist(scramble_moves, use_pregenerated=False):
         return True  # No need to check if not using pregenerated scrambles
         
     # Check if scramble file exists
-    filepath = os.path.join("data/scramble", f"{scramble_moves}movescramble.txt")
+    filepath = os.path.join("data/scrambles", f"{scramble_moves}movescramble.txt")
     if os.path.exists(filepath):
         # Check if file has content
         with open(filepath, 'r') as f:
@@ -642,7 +642,7 @@ def ensure_scrambles_exist(scramble_moves, use_pregenerated=False):
     # File doesn't exist or is empty, generate scrambles
     print(f"Generating scrambles for difficulty level {scramble_moves}...")
     try:
-        subprocess.run(["python", "gen.py", "--level", str(scramble_moves)], check=True)
+        subprocess.run(["python", "src/scramble_generator.py", "--level", str(scramble_moves)], check=True)
         if os.path.exists(filepath):
             return True
         else:

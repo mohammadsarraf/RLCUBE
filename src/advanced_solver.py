@@ -5,7 +5,7 @@ import os
 import time
 import kociemba as koc
 from cube import Cube
-from cube_rl import CubeEnvironment, MOVES, DQN
+from rl_agent import CubeEnvironment, MOVES, DQN
 from test_rl_agent import find_latest_checkpoint
 
 class AdvancedCubeSolver:
