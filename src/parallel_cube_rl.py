@@ -26,7 +26,7 @@ def train_level_wrapper(level, max_level, min_episodes, max_episodes,
     # Construct checkpoint path if not provided
     if checkpoint is None and level > 1:
         prev_level = level - 1
-        prev_checkpoint = os.path.join("modelCheckpoints", f'cube_solver_model_scramble_{prev_level}.pt')
+        prev_checkpoint = os.path.join("data/modelCheckpoints", f'cube_solver_model_scramble_{prev_level}.pt')
         if os.path.exists(prev_checkpoint):
             checkpoint = prev_checkpoint
             print(f"[Process {process_id}] Using checkpoint from level {prev_level}")
@@ -94,7 +94,7 @@ def parallel_progressive_training(start_level=None, max_level=5, min_episodes=50
             # If this is the first level and no custom checkpoint is provided
             if i == 0 and checkpoint_to_use is None and level > 1:
                 prev_level = level - 1
-                prev_checkpoint = os.path.join("modelCheckpoints", f'cube_solver_model_scramble_{prev_level}.pt')
+                prev_checkpoint = os.path.join("data/modelCheckpoints", f'cube_solver_model_scramble_{prev_level}.pt')
                 if os.path.exists(prev_checkpoint):
                     checkpoint_to_use = prev_checkpoint
             
@@ -135,7 +135,7 @@ def parallel_improve_levels(levels=None, min_episodes=3000, max_episodes=8000,
     # If no levels specified, find all available checkpoint levels
     if levels is None:
         levels = []
-        for file in os.listdir("modelCheckpoints"):
+        for file in os.listdir("data/modelCheckpoints"):
             if file.startswith('cube_solver_model_scramble_') and file.endswith('.pt'):
                 try:
                     level = int(file.split('_')[-1].split('.')[0])
@@ -160,7 +160,7 @@ def parallel_improve_levels(levels=None, min_episodes=3000, max_episodes=8000,
     
     for i, level in enumerate(levels):
         # Get the checkpoint for this level
-        checkpoint = os.path.join("modelCheckpoints", f'cube_solver_model_scramble_{level}.pt')
+        checkpoint = os.path.join("data/modelCheckpoints", f'cube_solver_model_scramble_{level}.pt')
         
         if not os.path.exists(checkpoint):
             print(f"Warning: Checkpoint for level {level} not found. Skipping.")
@@ -322,7 +322,7 @@ def main():
             print("Error: --test_level must be specified with test mode")
             sys.exit(1)
         if args.model is None:
-            checkpoint = os.path.join("modelCheckpoints", f'cube_solver_model_scramble_{args.test_level}.pt')
+            checkpoint = os.path.join("data/modelCheckpoints", f'cube_solver_model_scramble_{args.test_level}.pt')
             if not os.path.exists(checkpoint):
                 print(f"Error: No checkpoint found for level {args.test_level}. Please specify --model.")
                 sys.exit(1)
