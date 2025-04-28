@@ -10,12 +10,12 @@ def find_latest_checkpoint():
     """Find the latest checkpoint file based on scramble difficulty"""
     checkpoints = []
     # Look in modelCheckpoints directory instead of current directory
-    if not os.path.exists("modelCheckpoints"):
-        os.makedirs("modelCheckpoints", exist_ok=True)
+    if not os.path.exists("data/modelCheckpoints"):
+        os.makedirs("data/modelCheckpoints", exist_ok=True)
         print("Created modelCheckpoints directory")
         return None
         
-    for file in os.listdir("modelCheckpoints"):
+    for file in os.listdir("data/modelCheckpoints"):
         if file.startswith('cube_solver_model_scramble_') and file.endswith('.pt'):
             try:
                 # Extract scramble level from filename
@@ -29,7 +29,7 @@ def find_latest_checkpoint():
     
     # Sort by scramble level (descending) to get the most advanced model
     checkpoints.sort(reverse=True)
-    latest_checkpoint = os.path.join("modelCheckpoints", checkpoints[0][1])
+    latest_checkpoint = os.path.join("data/modelCheckpoints", checkpoints[0][1])
     print(f"Found latest checkpoint for {checkpoints[0][0]} scramble moves: {latest_checkpoint}")
     return latest_checkpoint
 
@@ -44,7 +44,7 @@ def load_scrambles_from_file(n_moves, num_scrambles=100):
     Returns:
         List of scramble data dictionaries
     """
-    filepath = os.path.join("scrambles", f"{n_moves}movescramble.txt")
+    filepath = os.path.join("data/scrambles", f"{n_moves}movescramble.txt")
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"Scramble file not found: {filepath}. Generate it using gen.py --level {n_moves}")
     

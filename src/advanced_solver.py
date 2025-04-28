@@ -1428,7 +1428,8 @@ def solve_from_input():
         # Use the advanced solver with the scramble
         success, solution, strategy = solve_with_retry(
             scramble_sequence=scramble,
-            verbose=True
+            verbose=True,
+            model_path="data/modelCheckpoints/cube_solver_model_scramble_6.pt"
         )
         
         # Display the results

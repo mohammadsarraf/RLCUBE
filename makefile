@@ -19,8 +19,8 @@ input:
 	python src/advanced_solver.py --interactive --model "data/modelCheckpoints/cube_solver_model_scramble_$(n).pt"
 
 
-.PHONY: advance
-advance:
+.PHONY: solve
+solve:
 	python src/advanced_solver.py --benchmark --scramble_moves $(n) --tests "$(t)" --use_pregenerated
 
 
