@@ -29,19 +29,19 @@ improve:
 	python src/rl_agent.py --level "$(n)" --max_level "$(n)" --min_rate "$(r)" --batch_size 128 --use_pregenerated --target_rate 100 --model "data/modelCheckpoints/cube_solver_model_scramble_$(n).pt"
 
 
-.PHONY: parallel_train
-parallel_train:
-	python src/parallel_cube_rl.py --mode train --level $(s) --max_level $(e) --min_rate $(r) --use_pregenerated --target_rate 100 --min_episodes 50000 --batch_size 128 --recent_window $(w) --processes $(p)
+# .PHONY: parallel_train
+# parallel_train:
+# 	python src/parallel_cube_rl.py --mode train --level $(s) --max_level $(e) --min_rate $(r) --use_pregenerated --target_rate 100 --min_episodes 50000 --batch_size 128 --recent_window $(w) --processes $(p)
 
 
-.PHONY: parallel_improve
-parallel_improve:
-	python src/parallel_cube_rl.py --mode improve --levels $(l) --min_rate $(r) --batch_size 256 --use_pregenerated --target_rate 100 --processes $(p)
+# .PHONY: parallel_improve
+# parallel_improve:
+# 	python src/parallel_cube_rl.py --mode improve --levels $(l) --min_rate $(r) --batch_size 256 --use_pregenerated --target_rate 100 --processes $(p)
 
 
-.PHONY: parallel_test
-parallel_test:
-	python src/parallel_cube_rl.py --mode test --test_level $(n) --num_tests $(t) --use_pregenerated
+# .PHONY: parallel_test
+# parallel_test:
+# 	python src/parallel_cube_rl.py --mode test --test_level $(n) --num_tests $(t) --use_pregenerated
 
 
 .PHONY: gen
