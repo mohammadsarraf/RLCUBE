@@ -806,3 +806,461 @@ def test_agent(num_tests=100, scramble_moves=1, checkpoint_path=None, use_pregen
     
     return success_rate, avg_moves
 
+def continuous_curriculum_training(max_scramble=20, min_episodes=50000, max_episodes=200000,
+                               success_threshold=95, batch_size=128, checkpoint_path=None,
+                               use_pregenerated=True, checkpoint_interval=1000, recent_window=10000,
+                               agent_config=None, plateau_patience=50000, required_improvement=0.5):
+    """
+    Train with continuous curriculum learning across multiple difficulty levels.
+    Start with easy scrambles (level 1) and gradually introduce harder scrambles
+    as the agent achieves success on current levels.
+    
+    Args:
+        max_scramble: Maximum difficulty level to train up to
+        min_episodes: Minimum total episodes to train for
+        max_episodes: Maximum total episodes to train for
+        success_threshold: Success rate threshold to introduce the next difficulty level
+        batch_size: Batch size for training
+        checkpoint_path: Path to a checkpoint to resume training from
+        use_pregenerated: Whether to use pregenerated scrambles
+        checkpoint_interval: How often to save checkpoints (in episodes)
+        recent_window: Number of recent episodes to calculate success rate from
+        agent_config: Dictionary of DQNAgent configuration parameters
+        plateau_patience: Number of episodes to wait before advancing level if no improvement
+        required_improvement: Minimum percentage point improvement required over plateau_patience episodes
+    """
+    print(f"\n=== Starting Continuous Curriculum Training (Max Level: {max_scramble}) ===")
+    
+    # Ensure scrambles exist for all levels if using pregenerated scrambles
+    if use_pregenerated:
+        for level in range(1, max_scramble + 1):
+            if not ensure_scrambles_exist(level, use_pregenerated):
+                print(f"Warning: Could not generate scrambles for level {level}. Using random scrambles for this level.")
+    
+    # Set default agent configuration if not provided
+    default_config = {
+        'learning_rate': 0.001,
+        'memory_size': 150000,
+        'gamma': 0.99,
+        'epsilon_start': 1.0,
+        'epsilon_min': 0.05,
+        'epsilon_decay': 0.995,
+        'target_update_freq': 1000,
+        'double_dqn': True,
+        'dueling_dqn': True,
+        'prioritized_replay': True,
+        'alpha': 0.6,
+        'beta': 0.4,
+        'beta_increment': 0.001
+    }
+    
+    # Override defaults with provided configuration
+    if agent_config:
+        default_config.update(agent_config)
+    
+    # Initialize agent
+    state_size = 6 * 9 * 6  # 6 faces, 9 stickers per face, 6 possible colors
+    action_size = len(rl_agent.MOVES)
+    
+    agent = rl_agent.DQNAgent(
+        state_size=state_size, 
+        action_size=action_size,
+        learning_rate=default_config['learning_rate'],
+        memory_size=default_config['memory_size'],
+        gamma=default_config['gamma'],
+        epsilon_start=default_config['epsilon_start'],
+        epsilon_min=default_config['epsilon_min'],
+        epsilon_decay=default_config['epsilon_decay'],
+        target_update_freq=default_config['target_update_freq'],
+        double_dqn=default_config['double_dqn'],
+        dueling_dqn=default_config['dueling_dqn'],
+        prioritized_replay=default_config['prioritized_replay'],
+        alpha=default_config['alpha'],
+        beta=default_config['beta'],
+        beta_increment=default_config['beta_increment']
+    )
+    
+    # Print agent configuration
+    print(f"Agent Configuration:")
+    for key, value in default_config.items():
+        print(f"  - {key}: {value}")
+    
+    # Create checkpoint directory if it doesn't exist
+    os.makedirs("data/modelCheckpoints", exist_ok=True)
+    
+    # Single checkpoint file path
+    checkpoint_file = os.path.join("data/modelCheckpoints", "cube_solver_curriculum_all.pt")
+    
+    # Initialize variables
+    current_episode = 0
+    active_levels = [1]  # Start with level 1
+    level_stats = {}
+    level_plateau_counters = {}  # Track episodes since improvement for each level
+    level_best_rates = {}  # Track best success rate for each level
+    
+    # Load checkpoint if provided
+    if checkpoint_path:
+        try:
+            checkpoint_data = torch.load(checkpoint_path)
+            if isinstance(checkpoint_data, dict) and 'model' in checkpoint_data:
+                # New checkpoint format with metadata
+                agent.policy_net.load_state_dict(checkpoint_data['model'])
+                current_episode = checkpoint_data.get('episode', 0)
+                active_levels = checkpoint_data.get('active_levels', [1])
+                level_stats = checkpoint_data.get('level_stats', {})
+                level_plateau_counters = checkpoint_data.get('plateau_counters', {})
+                level_best_rates = checkpoint_data.get('best_rates', {})
+                print(f"Loaded checkpoint from {checkpoint_path}")
+                print(f"Resuming from episode {current_episode} with active levels: {active_levels}")
+            else:
+                # Old checkpoint format (just model weights)
+                agent.policy_net.load_state_dict(checkpoint_data)
+                print(f"Loaded legacy checkpoint from {checkpoint_path}")
+            
+            # Also load to target network
+            agent.target_net.load_state_dict(agent.policy_net.state_dict())
+            
+            # If resuming training, use a lower epsilon
+            if current_episode > 0:
+                agent.epsilon = max(0.2, agent.epsilon_min)  # Start with moderate exploration
+                print(f"Setting exploration rate (epsilon) to {agent.epsilon:.4f}")
+        except Exception as e:
+            print(f"Failed to load checkpoint from {checkpoint_path}, starting fresh: {e}")
+    
+    # Initialize statistics tracking if not loaded from checkpoint
+    if not level_stats:
+        level_stats = {level: {
+            'episodes': 0,
+            'solved': 0,
+            'recent_episodes': deque(maxlen=recent_window),
+            'recent_solved': deque(maxlen=recent_window),
+            'rewards': deque(maxlen=100)
+        } for level in range(1, max_scramble + 1)}
+    else:
+        # Ensure all levels have all required fields
+        for level in range(1, max_scramble + 1):
+            # Add level if it doesn't exist
+            if level not in level_stats:
+                level_stats[level] = {
+                    'episodes': 0,
+                    'solved': 0,
+                    'recent_episodes': deque(maxlen=recent_window),
+                    'recent_solved': deque(maxlen=recent_window),
+                    'rewards': deque(maxlen=100)
+                }
+            else:
+                # Ensure all required fields exist
+                if 'recent_episodes' not in level_stats[level]:
+                    level_stats[level]['recent_episodes'] = deque(maxlen=recent_window)
+                if 'recent_solved' not in level_stats[level]:
+                    level_stats[level]['recent_solved'] = deque(maxlen=recent_window)
+                if 'rewards' not in level_stats[level]:
+                    level_stats[level]['rewards'] = deque(maxlen=100)
+                    
+                # Initialize with at least one item to avoid division by zero
+                if len(level_stats[level]['recent_episodes']) == 0:
+                    level_stats[level]['recent_episodes'].append(0)
+                if len(level_stats[level]['recent_solved']) == 0:
+                    level_stats[level]['recent_solved'].append(0)
+    
+    # Initialize plateau detection if not loaded
+    if not level_plateau_counters:
+        level_plateau_counters = {level: 0 for level in range(1, max_scramble + 1)}
+    
+    # Initialize best rates if not loaded
+    if not level_best_rates:
+        level_best_rates = {level: 0 for level in range(1, max_scramble + 1)}
+    
+    # Initialize environments for each difficulty level
+    envs = {}
+    for level in range(1, max_scramble + 1):
+        envs[level] = rl_agent.CubeEnvironment(
+            scramble_moves=level, 
+            use_pregenerated=use_pregenerated
+        )
+    
+    # Initialize reporting variables
+    training_losses = []
+    recent_scrambles = []  # (level, scramble, outcome, moves, reward)
+    start_time = time.time()
+    
+    # Main training loop - continue until all levels reach target success rate
+    all_levels_complete = False
+    while not all_levels_complete:
+        current_episode += 1
+        
+        # Select a difficulty level from active levels
+        # Weight selection to favor harder levels 
+        weights = []
+        for level in active_levels:
+            # Higher weight for harder levels, with a minimum weight
+            weight = max(0.1, level / sum(active_levels))
+            weights.append(weight)
+        
+        # Normalize weights
+        weights = [w/sum(weights) for w in weights]
+        
+        # Select level based on weights
+        selected_level = random.choices(active_levels, weights=weights)[0]
+        
+        # Get the environment for selected level
+        env = envs[selected_level]
+        
+        # Reset environment and get initial state
+        state = env.reset()
+        done = False
+        moves_taken = 0
+        episode_reward = 0
+        
+        # Get the scramble that was applied
+        scramble = " ".join(env.scramble_sequence) if hasattr(env, 'scramble_sequence') else "Random scramble"
+        
+        # Run one episode
+        while not done:
+            action = agent.act(state)
+            next_state, reward, done = env.step(action)
+            agent.remember(state, action, reward, next_state, done)
+            state = next_state
+            moves_taken += 1
+            episode_reward += reward
+            
+            if done:
+                solved = env.cube.is_solved()
+                outcome = "Solved" if solved else "Failed"
+                
+                # Update statistics for this level
+                level_stats[selected_level]['episodes'] += 1
+                level_stats[selected_level]['recent_episodes'].append(1)
+                
+                if solved:
+                    level_stats[selected_level]['solved'] += 1
+                    level_stats[selected_level]['recent_solved'].append(1)
+                else:
+                    level_stats[selected_level]['recent_solved'].append(0)
+                
+                level_stats[selected_level]['rewards'].append(episode_reward)
+                
+                # Add to recent scrambles list
+                recent_scrambles.append((selected_level, scramble, outcome, moves_taken, episode_reward))
+                if len(recent_scrambles) > 5:
+                    recent_scrambles.pop(0)
+                
+                break
+        
+        # Train the agent with experiences from memory
+        loss = agent.replay(batch_size)
+        if loss:
+            training_losses.append(loss)
+        
+        # Check if we should introduce a new difficulty level or save checkpoint - every 100 episodes
+        if current_episode % 100 == 0:
+            # Calculate success rates and check for plateaus
+            success_rates = {}
+            level_data = []
+            
+            for level in range(1, max_scramble + 1):
+                stats = level_stats[level]
+                
+                # Only calculate rates for levels with enough data
+                if len(stats['recent_episodes']) > 500:
+                    recent_success_rate = (sum(stats['recent_solved']) / len(stats['recent_episodes'])) * 100
+                    success_rates[level] = recent_success_rate
+                    
+                    # Check for improvement
+                    if level in active_levels:
+                        if recent_success_rate > level_best_rates[level] + required_improvement:
+                            # Reset plateau counter if we see improvement
+                            level_best_rates[level] = recent_success_rate
+                            level_plateau_counters[level] = 0
+                        else:
+                            # Increment plateau counter if no improvement
+                            level_plateau_counters[level] += 100  # Because we check every 100 episodes
+                
+                # Store level data for display
+                if stats['episodes'] > 0:
+                    overall_rate = (stats['solved'] / stats['episodes']) * 100
+                    recent_rate = (sum(stats['recent_solved']) / len(stats['recent_episodes'])) * 100 if stats['recent_episodes'] else 0
+                    plateau_count = level_plateau_counters.get(level, 0)
+                    
+                    level_data.append((
+                        level, 
+                        level in active_levels,
+                        stats['solved'], 
+                        stats['episodes'],
+                        overall_rate,
+                        recent_rate,
+                        plateau_count
+                    ))
+            
+            # Determine if all active levels meet success criteria or have plateaued
+            levels_ready_to_advance = []
+            for level in active_levels:
+                if level in success_rates:
+                    # Check if level has reached success threshold or plateaued
+                    if success_rates[level] >= success_threshold or level_plateau_counters[level] >= plateau_patience:
+                        levels_ready_to_advance.append(level)
+            
+            # If all current active levels are ready, add the next level
+            if len(levels_ready_to_advance) == len(active_levels):
+                next_level = max(active_levels) + 1
+                if next_level <= max_scramble:
+                    active_levels.append(next_level)
+                    # Reset plateau detection for the new level
+                    level_plateau_counters[next_level] = 0
+                    level_best_rates[next_level] = 0
+                    print(f"\nUnlocked difficulty level {next_level}! (Current levels: {active_levels})")
+                    
+                    # Write unlock event to log
+                    with open("data/curriculum_progress.log", "a") as f:
+                        f.write(f"Episode {current_episode}: Unlocked level {next_level}\n")
+                        
+                        # Log why we advanced (threshold or plateau)
+                        for level in levels_ready_to_advance:
+                            if level in success_rates and success_rates[level] >= success_threshold:
+                                f.write(f"  Level {level}: Reached success rate {success_rates[level]:.1f}% (threshold: {success_threshold}%)\n")
+                            else:
+                                f.write(f"  Level {level}: Plateaued after {level_plateau_counters[level]} episodes with best rate {level_best_rates[level]:.1f}%\n")
+            
+            # Calculate overall statistics
+            overall_solved = sum(stats['solved'] for stats in level_stats.values())
+            overall_episodes = sum(stats['episodes'] for stats in level_stats.values())
+            overall_success_rate = (overall_solved / overall_episodes) * 100 if overall_episodes > 0 else 0
+            
+            # Average loss
+            avg_loss = sum(training_losses[-100:]) / len(training_losses[-100:]) if training_losses else 0
+            
+            # Clear screen for cleaner display
+            os.system('cls' if os.name == 'nt' else 'clear')
+            
+            # Display training progress
+            print(f"=== Continuous Curriculum Training Progress ===")
+            print(f"  - Episode: {current_episode}")
+            print(f"  - Active Levels: {active_levels} (max: {max_scramble})")
+            print(f"  - Success Threshold: {success_threshold}% | Plateau Patience: {plateau_patience} episodes")
+            print(f"  - Batch Size: {batch_size} | Using Pregenerated: {use_pregenerated}")
+            print("=" * 50)
+            
+            # Performance metrics
+            print(f"Performance Summary:")
+            print(f"✓ Overall Success Rate: {overall_success_rate:.2f}%")
+            print(f"✓ Memory Size: {agent.get_memory_length()} | Epsilon: {agent.epsilon:.4f}")
+            print(f"✓ Average Loss: {avg_loss:.4f}")
+            print()
+            
+            # Level statistics
+            print(f"Level Statistics:")
+            print(f"{'*':1} {'Lvl':3} {'Solved':8} {'Total':8} {'Overall%':9} {'Recent%':9} {'Plateau':8}")
+            print("-" * 55)
+            
+            for level, is_active, solved, total, overall, recent, plateau in sorted(level_data):
+                active_marker = "*" if is_active else " "
+                print(f"{active_marker:1} {level:3d} {solved:8d} {total:8d} {overall:8.1f}% {recent:8.1f}% {plateau:8d}")
+            print()
+            
+            # Recent scrambles
+            print(f"Last {len(recent_scrambles)} Episodes:")
+            for level, scr, out, mvs, rew in recent_scrambles:
+                print(f"- Level {level}: {scr} ({out} in {mvs} moves, reward: {rew:.1f})")
+            
+            # Save checkpoint
+            if current_episode % checkpoint_interval == 0:
+                # Save model with metadata
+                checkpoint_data = {
+                    'model': agent.policy_net.state_dict(),
+                    'episode': current_episode,
+                    'active_levels': active_levels,
+                    'level_stats': {
+                        level: {
+                            'episodes': stats['episodes'],
+                            'solved': stats['solved']
+                        }
+                        for level, stats in level_stats.items()
+                    },
+                    'plateau_counters': level_plateau_counters,
+                    'best_rates': level_best_rates,
+                    'timestamp': time.time()
+                }
+                
+                # Save to the single checkpoint file
+                torch.save(checkpoint_data, checkpoint_file + "_" + str(current_episode))
+                print(f"\nSaved checkpoint: {checkpoint_file}")
+        
+        # Exit condition: Check if we have reached or exceeded max_scramble with all levels complete
+        if max(active_levels) == max_scramble and current_episode >= min_episodes:
+            # Check if all levels have reached the success threshold
+            all_complete = True
+            missing_levels = []
+            
+            for level in range(1, max_scramble + 1):
+                stats = level_stats[level]
+                if len(stats['recent_episodes']) > 500:
+                    recent_success_rate = (sum(stats['recent_solved']) / len(stats['recent_episodes'])) * 100
+                    if recent_success_rate < success_threshold:
+                        all_complete = False
+                        missing_levels.append((level, recent_success_rate))
+                else:
+                    all_complete = False
+                    missing_levels.append((level, 0))
+            
+            if all_complete:
+                print(f"\nAll difficulty levels 1-{max_scramble} have reached the target success rate of {success_threshold}%")
+                print(f"Training completed successfully after {current_episode} episodes.")
+                all_levels_complete = True
+            elif current_episode >= max_episodes:
+                # We've reached max_episodes but haven't completed all levels
+                # Check if we've made enough progress to justify stopping
+                incomplete_levels = [level for level, rate in missing_levels if rate < success_threshold * 0.8]
+                
+                if not incomplete_levels:
+                    print(f"\nReached max episodes ({max_episodes}) with good progress on all levels.")
+                    print(f"Levels not fully complete: {missing_levels}")
+                    print(f"Training stopping as progress is sufficient.")
+                    all_levels_complete = True
+    
+    # Training completed
+    total_time = time.time() - start_time
+    
+    # Save final model (already saved to cube_solver_curriculum_all.pt during training)
+    print(f"\nTraining completed after {current_episode} episodes in {total_time:.2f} seconds.")
+    print(f"Final model saved to: {checkpoint_file}")
+    
+    # Log training results
+    level_stats_summary = []
+    for level in range(1, max_scramble + 1):
+        stats = level_stats[level]
+        if stats['episodes'] > 0:
+            success_rate = (stats['solved'] / stats['episodes']) * 100
+            recent_rate = (sum(stats['recent_solved']) / len(stats['recent_episodes'])) * 100 if stats['recent_episodes'] else 0
+            level_stats_summary.append(f"Level {level}: {stats['solved']}/{stats['episodes']} ({success_rate:.1f}% overall, {recent_rate:.1f}% recent)")
+    
+    # Calculate overall statistics for the log
+    overall_solved = sum(stats['solved'] for stats in level_stats.values())
+    overall_episodes = sum(stats['episodes'] for stats in level_stats.values())
+    overall_success_rate = (overall_solved / overall_episodes) * 100 if overall_episodes > 0 else 0
+    
+    log_file = log_training_results(
+        scramble_moves="1-" + str(max_scramble),
+        episode=current_episode,
+        solved_episodes=overall_solved,
+        total_episodes=overall_episodes,
+        success_rate=overall_success_rate,
+        recent_success_rate=overall_success_rate,  # Same as overall for the log
+        time_taken=total_time,
+        agent_config=default_config,
+        level_stats=level_stats_summary,
+        recent_scrambles=[(f"L{level}", scr, out, mvs, rew) for level, scr, out, mvs, rew in recent_scrambles],
+        avg_loss=avg_loss,
+        epsilon=agent.epsilon,
+        memory_size=agent.get_memory_length()
+    )
+    
+    print(f"Training results logged to: {log_file}")
+    
+    # Test the final model on each difficulty level
+    print("\n=== Testing final model on each difficulty level ===")
+    for level in range(1, max_scramble + 1):
+        print(f"\nTesting on level {level}:")
+        test_agent(num_tests=50, scramble_moves=level, checkpoint_path=checkpoint_file, use_pregenerated=use_pregenerated)
+    
+    return checkpoint_file
+

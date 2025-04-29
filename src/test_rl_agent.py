@@ -113,8 +113,22 @@ def test_agent(model_path=None, scramble_moves=1, num_tests=100, use_pregenerate
     model = DQN(state_size, action_size).to(device)
     
     # Load the trained model
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.eval()  # Set to evaluation mode
+    try:
+        # First try to load the model directly (for backward compatibility)
+        checkpoint_data = torch.load(model_path, map_location=device)
+        
+        # Check if this is a curriculum checkpoint format (contains 'model' key and metadata)
+        if isinstance(checkpoint_data, dict) and 'model' in checkpoint_data:
+            print(f"Loading curriculum format checkpoint (episode {checkpoint_data.get('episode', 'unknown')})")
+            model.load_state_dict(checkpoint_data['model'])
+        else:
+            # Regular model format
+            model.load_state_dict(checkpoint_data)
+            
+        model.eval()  # Set to evaluation mode
+    except Exception as e:
+        print(f"Error loading model from {model_path}: {e}")
+        raise
     
     solved = 0
     avg_steps = 0
@@ -309,8 +323,22 @@ def solve_manual_scramble(scramble_sequence, model_path=None, max_steps=25):
     model = DQN(state_size, action_size).to(device)
     
     # Load the trained model
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.eval()  # Set to evaluation mode
+    try:
+        # First try to load the model directly (for backward compatibility)
+        checkpoint_data = torch.load(model_path, map_location=device)
+        
+        # Check if this is a curriculum checkpoint format (contains 'model' key and metadata)
+        if isinstance(checkpoint_data, dict) and 'model' in checkpoint_data:
+            print(f"Loading curriculum format checkpoint (episode {checkpoint_data.get('episode', 'unknown')})")
+            model.load_state_dict(checkpoint_data['model'])
+        else:
+            # Regular model format
+            model.load_state_dict(checkpoint_data)
+            
+        model.eval()  # Set to evaluation mode
+    except Exception as e:
+        print(f"Error loading model from {model_path}: {e}")
+        raise
     
     # Get initial state
     state = env._get_state()

@@ -45,8 +45,22 @@ class AdvancedCubeSolver:
         self.model = DQN(state_size, action_size).to(self.device)
         
         # Load the trained model
-        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
-        self.model.eval()  # Set to evaluation mode
+        try:
+            # First try to load the model directly (for backward compatibility)
+            checkpoint_data = torch.load(model_path, map_location=self.device)
+            
+            # Check if this is a curriculum checkpoint format (contains 'model' key and metadata)
+            if isinstance(checkpoint_data, dict) and 'model' in checkpoint_data:
+                print(f"Loading curriculum format checkpoint (episode {checkpoint_data.get('episode', 'unknown')})")
+                self.model.load_state_dict(checkpoint_data['model'])
+            else:
+                # Regular model format
+                self.model.load_state_dict(checkpoint_data)
+                
+            self.model.eval()  # Set to evaluation mode
+        except Exception as e:
+            print(f"Error loading model from {model_path}: {e}")
+            raise
         
         # Define macro-operators for solving specific patterns
         self.macros = {
@@ -1098,8 +1112,23 @@ def solve_benchmark(num_tests=100, scramble_moves=1, model_path=None, use_pregen
     state_size = 6 * 9 * 6
     action_size = len(MOVES)
     model = DQN(state_size, action_size).to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.eval()
+    
+    try:
+        # First try to load the model directly (for backward compatibility)
+        checkpoint_data = torch.load(model_path, map_location=device)
+        
+        # Check if this is a curriculum checkpoint format (contains 'model' key and metadata)
+        if isinstance(checkpoint_data, dict) and 'model' in checkpoint_data:
+            print(f"Loading curriculum format checkpoint (episode {checkpoint_data.get('episode', 'unknown')})")
+            model.load_state_dict(checkpoint_data['model'])
+        else:
+            # Regular model format
+            model.load_state_dict(checkpoint_data)
+            
+        model.eval()  # Set to evaluation mode
+    except Exception as e:
+        print(f"Error loading model from {model_path}: {e}")
+        raise
     
     # Statistics
     standard_solved = 0
@@ -1324,39 +1353,6 @@ def solve_benchmark(num_tests=100, scramble_moves=1, model_path=None, use_pregen
                             advanced_steps += len(solution_moves)
                             strategies_used[display_name] = strategies_used.get(display_name, 0) + 1
                             break
-                        
-                        # Try retries if needed
-                        for retry in range(1, max_retries):
-                            # Show retry
-                            output_manager.show_strategy(tier_num, display_name, retry)
-                            
-                            # Create retry params
-                            retry_params = {}
-                            if strategy_name == "_mcts_solve":
-                                retry_params["exploration_factor"] = 1.0 + (retry * 0.3)
-                            elif strategy_name == "_beam_search_solve":
-                                retry_params["beam_width"] = 3 + retry
-                            
-                            # Try with these parameters
-                            temp_env = CubeEnvironment(max_steps=max_steps)
-                            temp_env.cube = cube.copy()
-                            
-                            # Run the strategy - use the same solver but with retry params
-                            success, solution_moves = solver._run_strategy_with_params(
-                                strategy_fn, 
-                                cube.copy(), 
-                                retry_params, 
-                                verbose=False
-                            )
-                            
-                            if success:
-                                solved = True
-                                output_manager.print_success(f"Solved with {display_name} (Retry {retry}) in {len(solution_moves)} moves")
-                                advanced_solved += 1
-                                advanced_steps += len(solution_moves)
-                                strategy_key = f"{display_name} (retry {retry})"
-                                strategies_used[strategy_key] = strategies_used.get(strategy_key, 0) + 1
-                                break
                 
                 # If we tried everything and still couldn't solve it
                 if not solved:

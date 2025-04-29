@@ -180,6 +180,36 @@ class CubeEnvironment:
                 third_last_move.replace("'", "") == last_move.replace("'", "") and
                 ("'" in third_last_move) != ("'" in last_move)):
                 penalties.append(-15)  # Increased penalty for inefficient sequences like L R L'
+                
+        # --- NEW: DETECT AND PENALIZE LARGER REPETITIVE PATTERNS ---
+        # Check for repeating patterns of length 2 (like "L R L R L R")
+        if len(self.agent_moves) >= 6:
+            # Check if the last 6 moves form a repeating 2-move pattern
+            if (self.agent_moves[-6] == self.agent_moves[-4] == self.agent_moves[-2] and
+                self.agent_moves[-5] == self.agent_moves[-3] == self.agent_moves[-1]):
+                penalties.append(-25)  # Strong penalty for 3 repetitions of a 2-move sequence
+                
+        # Check for repeating patterns of length 3 (like "L R F L R F")
+        if len(self.agent_moves) >= 9:
+            # Check if the last 9 moves form a repeating 3-move pattern
+            if (self.agent_moves[-9] == self.agent_moves[-6] == self.agent_moves[-3] and
+                self.agent_moves[-8] == self.agent_moves[-5] == self.agent_moves[-2] and
+                self.agent_moves[-7] == self.agent_moves[-4] == self.agent_moves[-1]):
+                penalties.append(-30)  # Stronger penalty for 3 repetitions of a 3-move sequence
+                
+        # Penalize long stretches of the same face being manipulated
+        # (like "D D' D2 D D' D" - all on the D face)
+        if len(self.agent_moves) >= 5:
+            last_five_faces = [move[0] for move in self.agent_moves[-5:]]
+            if len(set(last_five_faces)) == 1:  # All moves were on the same face
+                penalties.append(-20)  # Penalty for obsessing over a single face
+                
+        # Penalize oscillating between just two faces for many moves
+        if len(self.agent_moves) >= 8:
+            last_eight_faces = [move[0] for move in self.agent_moves[-8:]]
+            unique_faces = set(last_eight_faces)
+            if len(unique_faces) == 2 and all(face in unique_faces for face in last_eight_faces):
+                penalties.append(-25)  # Penalty for oscillating between just two faces
         
         # Apply only the worst penalty instead of stacking them all
         if penalties:
@@ -601,6 +631,14 @@ if __name__ == "__main__":
     parser.add_argument('--num_tests', type=int, default=100,
                         help='Number of test cases to run with --test_only')
     
+    # New argument for curriculum training
+    parser.add_argument('--curriculum', action='store_true',
+                        help='Use continuous curriculum training instead of progressive training')
+    parser.add_argument('--success_threshold', type=int, default=60,
+                        help='Success rate threshold to unlock next difficulty level in curriculum training')
+    parser.add_argument('--checkpoint_interval', type=int, default=1000,
+                        help='How often to save checkpoints during curriculum training (in episodes)')
+    
     # Set defaults for advanced features
     parser.set_defaults(double_dqn=True, dueling_dqn=True, prioritized_replay=True)
     
@@ -642,20 +680,36 @@ if __name__ == "__main__":
             use_pregenerated=args.use_pregenerated
         )
     else:
-        # Run progressive training with specified or default parameters
-        helper.progressive_training(
-            start_level=args.level,
-            max_scramble=args.max_level,
-            min_episodes=args.min_episodes,
-            max_episodes=args.max_episodes,
-            target_success_rate=args.target_rate,
-            min_success_rate=args.min_rate,
-            batch_size=args.batch_size,
-            use_pregenerated=args.use_pregenerated,
-            custom_checkpoint=args.model,
-            recent_window=args.recent_window,
-            agent_config=agent_config
-        )
+        # Choose between curriculum training and progressive training
+        if args.curriculum:
+            print("Using continuous curriculum training mode")
+            helper.continuous_curriculum_training(
+                max_scramble=args.max_level,
+                min_episodes=args.min_episodes,
+                max_episodes=args.max_episodes,
+                success_threshold=args.success_threshold,
+                batch_size=args.batch_size,
+                checkpoint_path=args.model,
+                use_pregenerated=args.use_pregenerated,
+                checkpoint_interval=args.checkpoint_interval,
+                recent_window=args.recent_window,
+                agent_config=agent_config
+            )
+        else:
+            # Run progressive training with specified or default parameters
+            helper.progressive_training(
+                start_level=args.level,
+                max_scramble=args.max_level,
+                min_episodes=args.min_episodes,
+                max_episodes=args.max_episodes,
+                target_success_rate=args.target_rate,
+                min_success_rate=args.min_rate,
+                batch_size=args.batch_size,
+                use_pregenerated=args.use_pregenerated,
+                custom_checkpoint=args.model,
+                recent_window=args.recent_window,
+                agent_config=agent_config
+            )
     
     print("\n=== Examples for training and testing ===")
     print("# Train level 4 from scratch with optimized settings:")
@@ -669,6 +723,9 @@ if __name__ == "__main__":
     
     print("\n# Progressive training from level 1 to 10:")
     print("python cube_rl.py --max_level 10 --min_episodes 5000 --target_rate 50 --use_pregenerated --memory_size 200000")
+    
+    print("\n# Curriculum training from level 1 to 10:")
+    print("python cube_rl.py --curriculum --max_level 10 --min_episodes 50000 --max_episodes 200000 --success_threshold 60 --use_pregenerated --memory_size 150000")
     
     # To test the latest checkpoint:
     # test_agent(num_tests=100, scramble_moves=5, checkpoint_path="cube_solver_model_scramble_5.pt", use_pregenerated=True) 
