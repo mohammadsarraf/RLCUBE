@@ -10,9 +10,9 @@ test:
 .PHONY: test_curriculum
 test_curriculum:
 	@if [ -z "$(p)" ]; then \
-		python src/test_rl_agent.py --scramble $(n) --tests "$(t)" --model "data/modelCheckpoints/cube_solver_curriculum_all.pt"; \
+		python src/test_rl_agent.py --scramble $(n) --tests "$(t)" --model "data/modelCheckpoints/cube_solver_curriculum_all_[1, 2, 3, 4, 5].pt" ; \
 	else \
-		python src/test_rl_agent.py --scramble $(n) --tests "$(t)" --model "data/modelCheckpoints/cube_solver_curriculum_all.pt" --use_pregenerated; \
+		python src/test_rl_agent.py --scramble $(n) --tests "$(t)" --model "data/modelCheckpoints/cube_solver_curriculum_all_[1, 2, 3, 4, 5].pt" --use_pregenerated; \
 	fi
 #    make test_curriculum n=5 t=100
 #    make test_curriculum n=5 t=100 p=1
@@ -34,7 +34,7 @@ curriculum:
 
 .PHONY: input
 input:
-	python src/advanced_solver.py --interactive --model "data/modelCheckpoints/cube_solver_model_scramble_$(n).pt"
+	python src/advanced_solver.py --interactive --model "data/modelCheckpoints/cube_solver_curriculum_all_1, 2, 3, 4, 5.pt"
 
 
 .PHONY: input_curriculum
@@ -50,7 +50,7 @@ solve:
 
 .PHONY: solve_curriculum
 solve_curriculum:
-	python src/advanced_solver.py --benchmark --scramble_moves $(n) --tests "$(t)" --use_pregenerated --model "data/modelCheckpoints/cube_solver_curriculum_all.pt"
+	python src/advanced_solver.py --benchmark --scramble_moves $(n) --tests "$(t)" --use_pregenerated --model "data/modelCheckpoints/cube_solver_curriculum_all_[1, 2, 3, 4, 5].pt"
 
 #    make solve_curriculum n=5 t=100
 

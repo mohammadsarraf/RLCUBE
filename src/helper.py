@@ -889,7 +889,7 @@ def continuous_curriculum_training(max_scramble=20, min_episodes=50000, max_epis
     os.makedirs("data/modelCheckpoints", exist_ok=True)
     
     # Single checkpoint file path
-    checkpoint_file = os.path.join("data/modelCheckpoints", "cube_solver_curriculum_all.pt")
+    checkpoint_file = os.path.join("data/modelCheckpoints", "cube_solver_curriculum_all")
     
     # Initialize variables
     current_episode = 0
@@ -1182,7 +1182,7 @@ def continuous_curriculum_training(max_scramble=20, min_episodes=50000, max_epis
                 }
                 
                 # Save to the single checkpoint file
-                torch.save(checkpoint_data, checkpoint_file + "_" + str(current_episode))
+                torch.save(checkpoint_data, checkpoint_file + "_" + str(active_levels) + ".pt")
                 print(f"\nSaved checkpoint: {checkpoint_file}")
         
         # Exit condition: Check if we have reached or exceeded max_scramble with all levels complete

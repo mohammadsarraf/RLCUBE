@@ -47,3 +47,17 @@ Episode 284800: Unlocked level 8
   Level 5: Plateaued after 23100 episodes with best rate 58.7%
   Level 6: Plateaued after 10000 episodes with best rate 25.5%
   Level 7: Plateaued after 27900 episodes with best rate 7.3%
+Episode 11000: Unlocked level 2
+  Level 1: Reached success rate 90.4% (threshold: 90%)
+Episode 12400: Unlocked level 3
+  Level 1: Reached success rate 91.8% (threshold: 90%)
+  Level 2: Reached success rate 90.2% (threshold: 90%)
+Episode 48600: Unlocked level 4
+  Level 1: Reached success rate 99.1% (threshold: 90%)
+  Level 2: Reached success rate 97.7% (threshold: 90%)
+  Level 3: Reached success rate 90.0% (threshold: 90%)
+Episode 286200: Unlocked level 5
+  Level 1: Reached success rate 100.0% (threshold: 90%)
+  Level 2: Reached success rate 99.8% (threshold: 90%)
+  Level 3: Reached success rate 98.0% (threshold: 90%)
+  Level 4: Plateaued after 50000 episodes with best rate 80.8%
