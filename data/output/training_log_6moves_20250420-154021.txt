@@ -1,0 +1,25 @@
+
+=== Training Results ===
+Timestamp: 2025-04-20 15:40:21
+Difficulty Level: 6 moves
+Episodes: 50
+Solved Episodes: 33/50
+Success Rate: 66.00%
+Recent Success Rate: 66.00%
+Training Time: 0.00 seconds
+
+Last 10 Scrambles:
+- 41 (U R F' L2 B' D' in Failed moves, reward: 25.0)
+- 42 (D2 F' R L2 U' D2 in Solved moves, reward: 6.0)
+- 43 (D R B' U2 F' R2 R in Failed moves, reward: 25.0)
+- 44 (B2 U' F2 F2 F U F F2 D2 in Failed moves, reward: 25.0)
+- 45 (R U2 R' F2 B R2 in Solved moves, reward: 6.0)
+- 46 (D2 D' U2 R' B B2 L R' in Solved moves, reward: 7.0)
+- 47 (R' D2 U2 U' B' D' B in Solved moves, reward: 6.0)
+- 48 (R2 F' L' D B2 B L' in Solved moves, reward: 6.0)
+- 49 (D F2 U R2 D' R' in Failed moves, reward: 25.0)
+- 50 (D' B L' B U' D2 in Solved moves, reward: 6.0)
+
+Agent Configuration:
+  - test_mode: True
+  - checkpoint: modelCheckpoints/cube_solver_model_scramble_6.pt
