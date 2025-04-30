@@ -806,8 +806,8 @@ def test_agent(num_tests=100, scramble_moves=1, checkpoint_path=None, use_pregen
     
     return success_rate, avg_moves
 
-def continuous_curriculum_training(max_scramble=20, min_episodes=50000, max_episodes=200000,
-                               success_threshold=95, batch_size=128, checkpoint_path=None,
+def continuous_curriculum_training(max_scramble=20, min_episodes=50000, max_episodes=10000000,
+                               success_threshold=95, batch_size=512, checkpoint_path=None,
                                use_pregenerated=True, checkpoint_interval=1000, recent_window=10000,
                                agent_config=None, plateau_patience=50000, required_improvement=0.5):
     """
