@@ -37,9 +37,9 @@ input:
 	python src/advanced_solver.py --interactive --model "data/modelCheckpoints/cube_solver_curriculum_all_1, 2, 3, 4, 5.pt"
 
 
-.PHONY: input_curriculum
-input_curriculum:
-	python src/advanced_solver.py --interactive --model "data/modelCheckpoints/cube_solver_curriculum_all.pt"
+.PHONY: cinput
+cinput:
+	python src/advanced_solver.py --interactive --model "data/modelCheckpoints/cube_solver_curriculum_all_[1, 2, 3, 4, 5, 6].pt"
 
 #    make input_curriculum
 
