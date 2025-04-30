@@ -809,7 +809,7 @@ def test_agent(num_tests=100, scramble_moves=1, checkpoint_path=None, use_pregen
 def continuous_curriculum_training(max_scramble=20, min_episodes=50000, max_episodes=10000000,
                                success_threshold=95, batch_size=512, checkpoint_path=None,
                                use_pregenerated=True, checkpoint_interval=1000, recent_window=10000,
-                               agent_config=None, plateau_patience=50000, required_improvement=0.5):
+                               agent_config=None, plateau_patience=100000, required_improvement=0.2):
     """
     Train with continuous curriculum learning across multiple difficulty levels.
     Start with easy scrambles (level 1) and gradually introduce harder scrambles
