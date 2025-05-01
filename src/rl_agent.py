@@ -638,7 +638,8 @@ if __name__ == "__main__":
                         help='Success rate threshold to unlock next difficulty level in curriculum training')
     parser.add_argument('--checkpoint_interval', type=int, default=1000,
                         help='How often to save checkpoints during curriculum training (in episodes)')
-    
+    parser.add_argument('--plateau_patience', type=int, default=500000,
+                        help='Number of episodes to wait before advancing level if no improvement')
     # Set defaults for advanced features
     parser.set_defaults(double_dqn=True, dueling_dqn=True, prioritized_replay=True)
     
@@ -693,7 +694,8 @@ if __name__ == "__main__":
                 use_pregenerated=args.use_pregenerated,
                 checkpoint_interval=args.checkpoint_interval,
                 recent_window=args.recent_window,
-                agent_config=agent_config
+                agent_config=agent_config,
+                plateau_patience=args.plateau_patience,
             )
         else:
             # Run progressive training with specified or default parameters

@@ -26,7 +26,7 @@ curriculum:
 	@if [ -z "$(c)" ]; then \
 		python -c "import sys; sys.path.append('src'); import helper, rl_agent; helper.continuous_curriculum_training(max_scramble=$(m), min_episodes=$(min), max_episodes=$(max), success_threshold=$(r), batch_size=$(b), use_pregenerated=True)"; \
 	else \
-		python -c "import sys; sys.path.append('src'); import helper, rl_agent; helper.continuous_curriculum_training(max_scramble=$(m), min_episodes=$(min), max_episodes=$(max), success_threshold=$(r), batch_size=$(b), checkpoint_path='$(c)', use_pregenerated=True)"; \
+		python -c "import sys; sys.path.append('src'); import helper, rl_agent; helper.continuous_curriculum_training(max_scramble=$(m), min_episodes=$(min), max_episodes=$(max), success_threshold=$(r), batch_size=$(b), checkpoint_path='$(c)', use_pregenerated=True, plateau_patience=$(p))"; \
 	fi
 # make curriculum m=10 min=50000 max=200000 t=60 b=128
 # make curriculum m=10 min=50000 max=200000 t=60 b=128 c="data/modelCheckpoints/cube_solver_curriculum_all.pt"
