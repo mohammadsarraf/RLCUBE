@@ -17,8 +17,8 @@ train:
 	python src/rl_agent.py --level $(n) --max_level $(n) --min_rate $(r) --use_pregenerated --target_rate 100 --min_episodes 50000 --batch_size 128 --recent_window 10000
 
 
-.PHONY: curriculum
-curriculum:
+.PHONY: ctrain
+ctrain:
 	@if [ -z "$(c)" ]; then \
 		python -c "import sys; sys.path.append('src'); import helper, rl_agent; helper.continuous_curriculum_training(max_scramble=$(m), min_episodes=$(min), max_episodes=$(max), success_threshold=$(r), batch_size=$(b), use_pregenerated=True)"; \
 	else \
@@ -32,7 +32,7 @@ input:
 
 .PHONY: cinput
 cinput:
-	docker run -it --rm -v $(PWD):/app rlcube python src/advanced_solver.py --interactive --model "data/modelCheckpoints/cube_solver_curriculum_all_[1, 2, 3, 4, 5, 6].pt"
+	docker run -it --rm -v $(PWD):/app rlcube python src/advanced_solver.py --interactive --model "data/modelCheckpoints/localtraining/cube_solver_curriculum_all_6.pt"
 
 
 .PHONY: solve

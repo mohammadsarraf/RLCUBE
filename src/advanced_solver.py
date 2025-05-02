@@ -1421,11 +1421,24 @@ def solve_from_input():
     scramble = input("Enter a scramble sequence (e.g., 'R U F' L2'): ")
     
     try:
+        # Get the model path from command line arguments if available
+        import sys
+        import argparse
+        
+        parser = argparse.ArgumentParser(description='Advanced Cube Solver')
+        parser.add_argument('--model', type=str, default=None, 
+                            help='Path to the model checkpoint')
+        
+        # Parse only the known args to avoid errors with other args
+        args, _ = parser.parse_known_args()
+        
+        model_path = args.model if args.model else None
+        
         # Use the advanced solver with the scramble
         success, solution, strategy = solve_with_retry(
             scramble_sequence=scramble,
             verbose=True,
-            model_path="data/modelCheckpoints/cube_solver_model_scramble_6.pt"
+            model_path=model_path
         )
         
         # Display the results
@@ -1433,6 +1446,7 @@ def solve_from_input():
             print(f"\nSolution found using {strategy} strategy!")
             print(f"Solution: {' '.join(solution)}")
             print(f"Solution length: {len(solution)} moves")
+            print(f"Model used: {model_path if model_path else 'latest checkpoint'}")
             return success, solution, strategy
         else:
             print("\nFailed to solve the cube with all strategies.")

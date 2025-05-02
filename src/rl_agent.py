@@ -18,7 +18,7 @@ os.makedirs("data/modelCheckpoints", exist_ok=True)
 MOVES = ["U", "U'", "U2", "D", "D'", "D2", "L", "L'", "L2", "R", "R'", "R2", "F", "F'", "F2", "B", "B'", "B2"]
 
 class CubeEnvironment:
-    def __init__(self, max_steps=25, scramble_moves=1, use_pregenerated=False):
+    def __init__(self, max_steps=30, scramble_moves=1, use_pregenerated=False):
         self.cube = Cube()
         self.max_steps = max_steps  # Solution shouldn't be more than 25 moves
         self.current_step = 0
@@ -108,112 +108,12 @@ class CubeEnvironment:
         else:
             reward -= 5  # Reduced negative reward for not solving yet - was -10 before
             
-        # --- MOVE EFFICIENCY PENALTIES ---
-        # Collect penalties instead of directly applying them
-        penalties = []
-        
-        # Penalize repeating moves (like R R R instead of R')
-        if len(self.agent_moves) >= 3:
-            last_three_moves = self.agent_moves[-3:]
-            if last_three_moves[0] == last_three_moves[1] == last_three_moves[2]:
-                penalties.append(-15)  # Increased penalty for three consecutive identical moves
-        
-        if len(self.agent_moves) >= 2:
-            if self.agent_moves[-1] == self.agent_moves[-2]:
-                penalties.append(-15)  # Increased penalty for two consecutive identical moves
-                
-        # Penalize sequences like R2 R or R2 R' (inefficient move combinations)
-        if len(self.agent_moves) >= 2:
-            last_move = self.agent_moves[-1]
-            prev_move = self.agent_moves[-2]
-            
-            # Check if previous move was a double move (R2) and current move is on the same face (R or R')
-            if "2" in prev_move and not "2" in last_move:
-                # If they're moves on the same face
-                if prev_move.replace("2", "") == last_move.replace("'", ""):
-                    penalties.append(-15)  # Increased penalty for inefficient sequence
-            
-            # Check for the reverse case: R followed by R2 (another inefficient sequence)
-            elif "2" in last_move and not "2" in prev_move:
-                # If they're moves on the same face
-                if last_move.replace("2", "") == prev_move.replace("'", ""):
-                    penalties.append(-15)  # Increased penalty for inefficient sequence
-        
-        # Penalize inverse moves that cancel each other (like R R')
-        if len(self.agent_moves) >= 2:
-            last_move = self.agent_moves[-1]
-            prev_move = self.agent_moves[-2]
-            
-            # Check for move cancellations (simplified check)
-            # For basic moves like R and R'
-            if (last_move.replace("'", "") == prev_move.replace("'", "") and 
-                ("'" in last_move) != ("'" in prev_move) and 
-                "2" not in last_move and "2" not in prev_move):
-                penalties.append(-20)  # Increased penalty for immediately canceling moves
-        
-        # Penalize inefficient sequences like B2 F B2 (where B2 B2 would cancel out)
-        if len(self.agent_moves) >= 3:
-            last_move = self.agent_moves[-1]
-            second_last_move = self.agent_moves[-2]
-            third_last_move = self.agent_moves[-3]
-            
-            # Check for patterns like X2 Y X2 where X2 cancels out
-            if "2" in last_move and "2" in third_last_move:
-                # If they're the same face (like U2 F U2)
-                if last_move.replace("2", "") == third_last_move.replace("2", ""):
-                    penalties.append(-15)  # Increased penalty for inefficient sequences
-            
-            # Check for sequences where moves on opposite faces interact inefficiently
-            # For example B2 F B2 is just F
-            last_face = last_move[0]  # Get the face of the last move
-            third_last_face = third_last_move[0]  # Get the face of the third-last move
-            
-            # If the moves are on opposite faces and both are double moves (2)
-            if "2" in last_move and "2" in third_last_move:
-                if self.opposite_faces.get(last_face) == third_last_face:
-                    penalties.append(-15)  # Increased penalty for inefficient sequences
-            
-            # Check for patterns like L R L' where a move is followed by another move
-            # and then the inverse of the first move
-            if ("2" not in third_last_move and 
-                third_last_move.replace("'", "") != second_last_move.replace("'", "") and 
-                third_last_move.replace("'", "") == last_move.replace("'", "") and
-                ("'" in third_last_move) != ("'" in last_move)):
-                penalties.append(-15)  # Increased penalty for inefficient sequences like L R L'
-                
-        # --- NEW: DETECT AND PENALIZE LARGER REPETITIVE PATTERNS ---
-        # Check for repeating patterns of length 2 (like "L R L R L R")
-        if len(self.agent_moves) >= 6:
-            # Check if the last 6 moves form a repeating 2-move pattern
-            if (self.agent_moves[-6] == self.agent_moves[-4] == self.agent_moves[-2] and
-                self.agent_moves[-5] == self.agent_moves[-3] == self.agent_moves[-1]):
-                penalties.append(-25)  # Strong penalty for 3 repetitions of a 2-move sequence
-                
-        # Check for repeating patterns of length 3 (like "L R F L R F")
-        if len(self.agent_moves) >= 9:
-            # Check if the last 9 moves form a repeating 3-move pattern
-            if (self.agent_moves[-9] == self.agent_moves[-6] == self.agent_moves[-3] and
-                self.agent_moves[-8] == self.agent_moves[-5] == self.agent_moves[-2] and
-                self.agent_moves[-7] == self.agent_moves[-4] == self.agent_moves[-1]):
-                penalties.append(-30)  # Stronger penalty for 3 repetitions of a 3-move sequence
-                
-        # Penalize long stretches of the same face being manipulated
-        # (like "D D' D2 D D' D" - all on the D face)
-        if len(self.agent_moves) >= 5:
-            last_five_faces = [move[0] for move in self.agent_moves[-5:]]
-            if len(set(last_five_faces)) == 1:  # All moves were on the same face
-                penalties.append(-20)  # Penalty for obsessing over a single face
-                
-        # Penalize oscillating between just two faces for many moves
-        if len(self.agent_moves) >= 8:
-            last_eight_faces = [move[0] for move in self.agent_moves[-8:]]
-            unique_faces = set(last_eight_faces)
-            if len(unique_faces) == 2 and all(face in unique_faces for face in last_eight_faces):
-                penalties.append(-25)  # Penalty for oscillating between just two faces
-        
-        # Apply only the worst penalty instead of stacking them all
-        if penalties:
-            reward += min(penalties)
+        # --- PATTERN DETECTION AND PENALTIES ---
+        # Use the improved pattern detection from helper module
+        pattern_penalties = helper.detect_patterns(self.agent_moves)
+        if pattern_penalties:
+            # Apply top 3 worst penalties to avoid excessive punishment
+            reward += sum(sorted(pattern_penalties)[:3])
         
         # --- USE KOCIEMBA FOR IMPROVED REWARD SIGNALS ---
         try:
@@ -729,5 +629,3 @@ if __name__ == "__main__":
     print("\n# Curriculum training from level 1 to 10:")
     print("python cube_rl.py --curriculum --max_level 10 --min_episodes 50000 --max_episodes 200000 --success_threshold 60 --use_pregenerated --memory_size 150000")
     
-    # To test the latest checkpoint:
-    # test_agent(num_tests=100, scramble_moves=5, checkpoint_path="cube_solver_model_scramble_5.pt", use_pregenerated=True) 

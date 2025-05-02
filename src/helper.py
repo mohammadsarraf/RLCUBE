@@ -9,6 +9,71 @@ import subprocess
 import time
 import rl_agent
 
+def detect_patterns(moves, max_penalty=-200):
+    """
+    Detect repetitive patterns in a sequence of Rubik's cube moves.
+    Returns a list of penalty values based on detected patterns.
+    
+    Args:
+        moves: List of moves to analyze for patterns
+        max_penalty: Maximum penalty value to apply
+        
+    Returns:
+        List of penalty values (negative numbers)
+    """
+    penalties = []
+    
+    # Helper function to detect repeating patterns
+    def has_repeating_pattern(moves, pattern_length, min_repetitions=3):
+        if len(moves) < pattern_length * min_repetitions:
+            return False
+            
+        for start in range(len(moves) - pattern_length * min_repetitions + 1):
+            pattern = moves[start:start+pattern_length]
+            is_repeating = True
+            
+            for i in range(1, min_repetitions):
+                compare_slice = moves[start + i*pattern_length:start + (i+1)*pattern_length]
+                if pattern != compare_slice:
+                    is_repeating = False
+                    break
+                    
+            if is_repeating:
+                return True
+        return False
+
+    # Check for single move repetitions
+    repeat_counts = {}
+    for move in moves[-15:]:  # Look at last 15 moves
+        repeat_counts[move] = repeat_counts.get(move, 0) + 1
+    
+    # Penalize excessive repetition of same move
+    for move, count in repeat_counts.items():
+        if count >= 3:
+            penalties.append(-15 * count)  # Scales with repetition count
+    
+    # Check for patterns of different lengths
+    for pattern_length in range(2, 6):  # Check patterns of length 2-5
+        if has_repeating_pattern(moves, pattern_length):
+            penalties.append(-25 * pattern_length)  # Scales with pattern length
+    
+    # Analyze face diversity
+    recent_faces = [move[0] for move in moves[-10:]]
+    unique_faces = set(recent_faces)
+    
+    # Penalize limited face usage
+    if len(unique_faces) == 1:  # Single face
+        penalties.append(-50)
+    elif len(unique_faces) == 2 and len(recent_faces) >= 8:  # Two faces dominating
+        penalties.append(-35)
+    
+    # Apply increasing penalty based on move count after 15 moves
+    if len(moves) > 15:
+        move_penalty = -3 * (len(moves) - 15)**2
+        penalties.append(max(move_penalty, max_penalty))  # Cap at max_penalty
+        
+    return penalties
+
 def load_scrambles(cube, num_moves):
     """Load pregenerated scrambles from file"""
     cube.pregenerated_scrambles = []
@@ -1181,9 +1246,10 @@ def continuous_curriculum_training(max_scramble=20, min_episodes=50000, max_epis
                     'timestamp': time.time()
                 }
                 
-                # Save to the single checkpoint file
-                torch.save(checkpoint_data, checkpoint_file + "_" + str(active_levels) + ".pt")
-                print(f"\nSaved checkpoint: {checkpoint_file}")
+                # Use only the highest active level in the filename instead of the full array
+                highest_level = max(active_levels)
+                torch.save(checkpoint_data, f"{checkpoint_file}_{highest_level}.pt")
+                print(f"\nSaved checkpoint: {checkpoint_file}_{highest_level}.pt")
         
         # Exit condition: Check if we have reached or exceeded max_scramble with all levels complete
         if max(active_levels) == max_scramble and current_episode >= min_episodes:
