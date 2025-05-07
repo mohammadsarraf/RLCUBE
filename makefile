@@ -10,7 +10,7 @@ test:
 
 .PHONY: ctest
 ctest:
-	docker run -it --rm -v $(PWD):/app rlcube python src/test_rl_agent.py --scramble $(n) --tests "$(t)" --model "data/modelCheckpoints/cube_solver_curriculum_all_[1, 2, 3, 4, 5, 6].pt" --use_pregenerated
+	docker run -it --rm -v $(PWD):/app rlcube python src/test_rl_agent.py --scramble $(n) --tests "$(t)" --model "data/modelCheckpoints/localtraining/cube_solver_curriculum_all_6.pt" --use_pregenerated
 
 .PHONY: train
 train:
